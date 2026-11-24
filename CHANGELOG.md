@@ -2,6 +2,7 @@
 
 ## [0.8.7] - 2026-11-24 (unreleased candidate)
 
+- Publish aborted intercepted fetch/XHR requests through the native event hub, with one request failure and no response or request-finished event.
 - Preserve the FormData constructor's native document across navigation and collection, including retained constructors and multipart uploads.
 - Distinguish superseded navigation from genuine target closure so existing interrupted-navigation handling receives the correct error.
 - Keep lifecycle history delivery independent of the initiating caller's deadline.

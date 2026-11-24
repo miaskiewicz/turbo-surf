@@ -2784,7 +2784,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       fetchResponse,
       signal,
     );
-    this._publishHostRouteFulfillment(source, data, decision, signal, session);
+    this._publishHostRouteResult(source, data, decision, signal, session);
     return decision;
   }
 
@@ -2804,13 +2804,20 @@ return String(globalThis.__RESULT ?? ""); })()`,
       };
     return data;
   }
-  _publishHostRouteFulfillment(source, data, decision, signal, session) {
-    if (decision.fulfilled && !signal.aborted && session === this._session && !this._closed) {
+  _publishHostRouteResult(source, data, decision, signal, session) {
+    const aborted = decision.action === "abort";
+    if (
+      (decision.fulfilled || aborted) &&
+      !signal.aborted &&
+      session === this._session &&
+      !this._closed
+    ) {
       const value = decision.fulfilled;
-      const status = value.status ?? 200;
-      const body = [204, 205, 304].includes(status)
-        ? Buffer.alloc(0)
-        : Buffer.from(value.bodyBytes ?? []);
+      const status = aborted ? 0 : (value.status ?? 200);
+      const body =
+        aborted || [204, 205, 304].includes(status)
+          ? Buffer.alloc(0)
+          : Buffer.from(value.bodyBytes ?? []);
       native.liveNetworkLogPublishIntercepted(
         session,
         JSON.stringify({
@@ -2819,7 +2826,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
           status,
           statusText: "",
           ok: status >= 200 && status < 300,
-          headers: Object.entries(value.headers ?? {}),
+          headers: Object.entries(value?.headers ?? {}),
+          ...(aborted
+            ? { error: "net::ERR_" + (decision.errorCode || "ABORTED").toUpperCase() }
+            : {}),
           request: data.request,
           context: {
             resourceType: data.request.resourceType,

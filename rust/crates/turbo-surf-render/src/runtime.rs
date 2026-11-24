@@ -11738,7 +11738,7 @@ const __formDataValue=(value,filename,hasFilename)=>{
 if (typeof globalThis.FormData === "undefined") {
   globalThis.FormData = class FormData {
     constructor(form=undefined,submitter=undefined) {
-      const rows=ops.op_form_data_entries(form,submitter);
+      const rows=ops.op_form_data_entries(form,submitter,__document);
       try {
         const record=__makeFormDataRecord(rows);__formDataStates.set(this,record);
         if(form!==undefined&&!ops.op_form_data_event(form,__aliasFormData(record)))throw new __formDataTypeError("Native formdata event dispatch failed");

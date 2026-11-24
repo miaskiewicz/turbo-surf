@@ -1,3 +1,4 @@
+import { clickScrollBootstrap, scrollClickTarget } from "./click-scroll.mjs";
 /* eslint-disable no-underscore-dangle, eqeqeq, prefer-const, no-await-in-loop, unicorn/consistent-function-scoping, no-unused-vars, no-array-reverse */
 // A Playwright-shaped façade backed by the turbo-surf native (Rust) addon.
 // No browser, no Chromium: `goto` fetches over Rust+reqwest, the read/locator/
@@ -2039,6 +2040,7 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   }
   // click
   return `(() => { ${pick} else {
+    const { rect, clip } = (${scrollClickTarget.toString()})(el);
     // Only ambiguous descendant branches need a document-wide hit test: a leaf
     // or single chain must not depend on unrelated animated sibling geometry.
     let tgt = el, branched = false;
@@ -2047,7 +2049,6 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       tgt = tgt.firstElementChild;
     }
     const options = ${val} || {};
-    const rect = el.getBoundingClientRect();
     const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
     const button = options.button === "right" ? 2 : options.button === "middle" ? 1 : 0;
     const modifiers = options.modifiers || [];
@@ -2056,6 +2057,8 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
       ctrlKey: modifiers.includes("Control"),
       altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
+    if (o.clientX < clip.left || o.clientY < clip.top || o.clientX >= clip.right || o.clientY >= clip.bottom)
+      throw new Error("Click position is outside the visible scrollport after scrolling");
     if (branched || options.position) {
       const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
       if (hit && el.contains(hit)) tgt = hit;
@@ -2634,7 +2637,11 @@ class Page {
     const names = [...(this._bindings?.keys() ?? [])];
     if (this._routeHandlers?.size) names.push(this._routeBindingName);
     return (
-      buildExposeInitScript(names, this._routeBindingName) + "\n" + (this._routeInitScript ?? "")
+      clickScrollBootstrap +
+      "\n" +
+      buildExposeInitScript(names, this._routeBindingName) +
+      "\n" +
+      (this._routeInitScript ?? "")
     );
   }
 
@@ -2653,6 +2660,8 @@ class Page {
 
   _engineInitScriptSource() {
     return (
+      clickScrollBootstrap +
+      "\n" +
       buildExposeInitScript([...this._mergedBindings().keys()], this._routeBindingName) +
       "\n" +
       (this._routeInitScript ?? "")

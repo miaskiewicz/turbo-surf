@@ -158,6 +158,7 @@ fn selector_sources(source: &str) -> Result<Vec<String>, String> {
 }
 fn candidate_seed(selector: &Selector<'_>) -> Option<String> {
     let mut tag = None;
+    let mut functional = None;
     for component in selector.iter_raw_match_order() {
         let (prefix, name) = match component {
             Component::Combinator(_) => break,
@@ -167,6 +168,10 @@ fn candidate_seed(selector: &Selector<'_>) -> Option<String> {
                 tag = Some(value.name.as_ref());
                 continue;
             }
+            Component::Is(values) | Component::Where(values) | Component::Any(_, values) => {
+                functional = functional.or_else(|| positive_functional_seed(values));
+                continue;
+            }
             _ => continue,
         };
         return candidate_identifier(prefix, name);
@@ -174,12 +179,31 @@ fn candidate_seed(selector: &Selector<'_>) -> Option<String> {
     // Keep the more selective ID/class buckets; a type-only bucket still avoids
     // evaluating dynamic and positional selectors against unrelated elements.
     tag.and_then(|name| candidate_identifier("", name))
+        .or(functional)
+}
+
+// Every alternative needs a static necessary seed. Their union only narrows
+// candidates; dirty checked state and other live predicates are still matched.
+fn positive_functional_seed(selectors: &[Selector<'_>]) -> Option<String> {
+    let seeds = selectors
+        .iter()
+        .map(candidate_seed)
+        .collect::<Option<Vec<_>>>()?;
+    (!seeds.is_empty()).then(|| seeds.join(","))
 }
 
 fn candidate_identifier(prefix: &str, name: &str) -> Option<String> {
     let mut source = String::from(prefix);
     cssparser::serialize_identifier(name, &mut source).ok()?;
     Some(source)
+}
+
+// A top-level pseudo-element selects no source Element. Functional alternatives
+// and shadow selectors retain their existing matching paths.
+fn ordinary_element_selector(selector: &Selector<'_>) -> bool {
+    !selector
+        .iter_raw_match_order()
+        .any(|part| matches!(part, Component::PseudoElement(_)))
 }
 
 fn shadow_selector(selector: &Selector<'_>) -> bool {
@@ -290,6 +314,9 @@ impl Matcher<'_> {
     /// The elements of this scope one selector of a rule matches.
     fn selector_nodes(&self, selector: &Selector<'_>, source: &str) -> Result<Vec<Handle>, String> {
         if !shadow_selector(selector) {
+            if !ordinary_element_selector(selector) {
+                return Ok(Vec::new());
+            }
             return self.ordinary_nodes(source, candidate_seed(selector).as_deref());
         }
         let mut result = Vec::new();
@@ -604,6 +631,73 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn positive_functional_candidates_bound_work_without_caching_live_results() {
+        let mut tree = Tree::parse(&format!("<body>{}<input id=a type=checkbox class=pick><textarea class=pick></textarea><button></button>", "<style></style>".repeat(1000)));
+        let input = tree.get_element_by_id("a").unwrap();
+        for checked in [false, true, false] {
+            tree.set_form_property(
+                input,
+                turbo_dom_parser::rtdom::tree::FormProp::Checked,
+                checked,
+            );
+            let graph = Composition::scopes(&tree).unwrap();
+            for (css, bounded) in [
+                (":is(input,textarea):checked{width:3px}", true),
+                (":-webkit-any(input,textarea):checked{width:3px}", true),
+                (":where(input,textarea):not(.missing){width:3px}", true),
+                (
+                    ":is(:where(input,textarea),button):not(.missing){width:3px}",
+                    true,
+                ),
+                (":is(input,:not(.missing)):checked{width:3px}", false),
+                (":is(:scope,.missing){width:3px}", false),
+            ] {
+                let expected = legacy_targets(&tree, tree.root(), &graph, css);
+                ORDINARY_MATCHES.with(|count| count.set(0));
+                let actual = prepared(&tree, tree.root(), &graph, css).targets;
+                assert_eq!(actual, expected);
+                if bounded {
+                    assert!(ORDINARY_MATCHES.with(|count| count.get()) <= 3);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_pseudo_element_rules_do_not_scan_element_candidates() {
+        let mut tree = Tree::parse(&format!(
+            "<body>{}<input id=pick class='pick foo::bar' data-label='::before' type=checkbox checked>",
+            "<style></style>".repeat(1000)
+        ));
+        let pick = tree.get_element_by_id("pick").unwrap();
+        for checked in [false, true, false] {
+            tree.set_form_property(
+                pick,
+                turbo_dom_parser::rtdom::tree::FormProp::Checked,
+                checked,
+            );
+            let graph = Composition::scopes(&tree).unwrap();
+            for (css, matches_pick) in [
+                ("*::before,*::after,input:checked::before,.pick:hover::-webkit-input-placeholder{width:3px}", false),
+                (".pick,*::before,.pick::after{width:3px}", true),
+                ("[data-label='::before']{width:3px}", true),
+                (r".foo\:\:bar:checked{width:3px}", checked),
+                (":is(.pick,.missing){width:3px}", true),
+            ] {
+                let expected = legacy_targets(&tree, tree.root(), &graph, css);
+                ORDINARY_MATCHES.with(|count| count.set(0));
+                let actual = prepared(&tree, tree.root(), &graph, css).targets;
+                assert_eq!(actual, expected);
+                assert_eq!(actual.iter().any(|target| target.source == source_id(1, pick)), matches_pick);
+                if css.starts_with("*::before") {
+                    assert!(actual.is_empty());
+                    assert_eq!(ORDINARY_MATCHES.with(|count| count.get()), 0);
+                }
+            }
+        }
     }
 
     #[test]

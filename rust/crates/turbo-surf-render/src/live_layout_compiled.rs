@@ -153,6 +153,7 @@ fn compile(source: &str) -> Result<Option<Plan>, String> {
         .0
         .iter()
         .zip(sources)
+        .filter(|(selector, _)| ordinary_element_selector(selector))
         .map(|(selector, source)| SelectorPlan {
             source,
             seed: candidate_seed(selector),

@@ -97,6 +97,43 @@ async fn profiled_page(
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn detached_render_construction_reuses_connected_document_geometry() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>
+      #target{width:60px;height:20px;padding:0;border:0}
+      </style><body><div id=target></div><script>
+      const target=document.getElementById('target'),scratch=[];
+      globalThis.widths=[];
+      for(let index=0;index<6;index++){
+        widths.push(target.clientWidth);
+        const host=document.createElement('div');
+        const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+        icon.appendChild(document.createElementNS('http://www.w3.org/2000/svg','path'));
+        host.appendChild(icon);host.setAttribute('class','detached');
+        host.style.padding='9px';host.textContent='detached text';
+        const input=document.createElement('input');input.defaultChecked=false;
+        host.appendChild(input);scratch.push(host);
+      }
+      globalThis.allDetached=scratch.every(node=>!node.isConnected);
+      </script>"#;
+    let (mut page, profile, _directory) = profiled_page("detached-render", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[60,60,60,60,60,60]"
+    );
+    assert_eq!(
+        page.eval_expression("String(allDetached)").await.unwrap(),
+        "true"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(profile["cacheMisses"], 1);
+    assert_eq!(profile["cacheHits"], 5);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     let _environment = PROFILE_ENV.lock().await;
     let mut html = String::from(

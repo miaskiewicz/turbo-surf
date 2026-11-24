@@ -15,6 +15,13 @@ pub(crate) enum QueryKind {
 pub(crate) struct Query {
     pub(crate) source: turbo_dom_parser::rtdom::tree::Handle,
     pub(crate) kind: QueryKind,
+    pub(crate) retained_scroll: bool,
+}
+
+#[derive(Clone, Copy)]
+struct QueryContext<'a> {
+    query: Query,
+    tree: Option<&'a turbo_dom_parser::rtdom::tree::Tree>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -267,7 +274,7 @@ fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool
 fn independent_effect(
     path: &[&turbo_dom_layout::StyledElement],
     requested: &[&turbo_dom_layout::StyledElement],
-    kind: QueryKind,
+    context: QueryContext<'_>,
 ) -> bool {
     let Some(element) = path.last() else {
         return false;
@@ -278,11 +285,20 @@ fn independent_effect(
     {
         return false;
     }
-    if kind == QueryKind::ScrollExtent
+    if context.query.kind == QueryKind::ScrollExtent
         && requested
             .last()
             .is_some_and(|target| path.iter().any(|ancestor| ancestor.source == target.source))
     {
+        return false;
+    }
+    if context
+        .tree
+        .is_some_and(|tree| clipped_effect(path, requested, tree))
+    {
+        return true;
+    }
+    if context.query.retained_scroll {
         return false;
     }
     // With overlay scrollbars and zero retained offsets, clipping/scrolling
@@ -295,6 +311,74 @@ fn independent_effect(
                 .get("scrollbar-gutter")
                 .is_none_or(|value| value.eq_ignore_ascii_case("auto"))
     })
+}
+
+fn clipped_effect(
+    path: &[&turbo_dom_layout::StyledElement],
+    requested: &[&turbo_dom_layout::StyledElement],
+    tree: &turbo_dom_parser::rtdom::tree::Tree,
+) -> bool {
+    // Only an exclusive HTML clipping box isolates outside overflow. Inline
+    // no-box clips and escaping descendants do not establish that proof.
+    if !tree.fullscreen_stack().is_empty() || tree.query_selector("dialog,[popover]").is_some() {
+        return false;
+    }
+    path.iter().rev().skip(1).any(|ancestor| {
+        ancestor.source.is_some()
+            && !requested
+                .iter()
+                .any(|target| target.source == ancestor.source)
+            && clip_box(&ancestor.style)
+            && ancestor.source.is_some_and(|source| {
+                !matches!(tree.local_name(source), Some("html" | "body" | "frameset"))
+            })
+            && overflow_axes(&ancestor.style).is_some_and(|axes| axes == ["hidden"; 2])
+            && fixed_free_clip(ancestor, tree)
+    })
+}
+
+fn clip_box(style: &ComputedStyle) -> bool {
+    let display = style.get("display");
+    let boxed = matches!(
+        display,
+        Some(
+            "block"
+                | "flow-root"
+                | "inline-block"
+                | "flex"
+                | "inline-flex"
+                | "grid"
+                | "inline-grid"
+                | "list-item"
+        )
+    );
+    match style.get("position") {
+        Some("relative") => boxed,
+        Some("absolute") => boxed || display == Some("inline"),
+        _ => false,
+    }
+}
+
+fn fixed_free_clip(
+    element: &turbo_dom_layout::StyledElement,
+    tree: &turbo_dom_parser::rtdom::tree::Tree,
+) -> bool {
+    element.source.is_some_and(|source| {
+        tree.namespace_uri(source) == Some("http://www.w3.org/1999/xhtml")
+            && tree.local_name(source) != Some("dialog")
+            && !tree.has_attribute(source, "popover")
+    }) && element
+        .style
+        .get("-internal-top-layer")
+        .is_none_or(|value| value == "none")
+        && matches!(
+            element.style.get("position"),
+            None | Some("static" | "relative" | "absolute" | "sticky")
+        )
+        && element.children.iter().all(|node| match node {
+            StyledNode::Element(child) => fixed_free_clip(child, tree),
+            _ => true,
+        })
 }
 
 fn overflow_axes(style: &ComputedStyle) -> Option<[&'static str; 2]> {
@@ -389,6 +473,7 @@ pub(crate) fn validate_or_request(
     requested: Option<Query>,
     completed: &CompletedAnimations,
     observed: bool,
+    tree: Option<&turbo_dom_parser::rtdom::tree::Tree>,
 ) -> Result<Admission, String> {
     // An animation whose presentation is disabled contributes no presented value
     // to this layout and so cannot invalidate it (#529). Dev-overlay / hydration
@@ -397,7 +482,7 @@ pub(crate) fn validate_or_request(
     if crate::animation_policy::presentation_disabled() {
         return Ok(Admission::Accepted(true));
     }
-    match validate_with_lifecycle(nodes, rules, requested, completed) {
+    match validate_with_lifecycle(nodes, rules, requested, completed, tree) {
         Ok(strict) => Ok(Admission::Accepted(strict)),
         Err(rejection) if !observed => {
             let definitions = Definitions::collect(rules);
@@ -407,7 +492,7 @@ pub(crate) fn validate_or_request(
                     if !element_path(nodes, query.source, &mut path) {
                         return Err(rejection);
                     }
-                    Some((path, query.kind))
+                    Some((path, QueryContext { query, tree }))
                 }
                 None => None,
             };
@@ -432,7 +517,7 @@ pub(crate) fn validate_or_request(
 
 struct LifecycleCandidates<'a> {
     definitions: &'a Definitions,
-    requested: Option<(Vec<&'a turbo_dom_layout::StyledElement>, QueryKind)>,
+    requested: Option<(Vec<&'a turbo_dom_layout::StyledElement>, QueryContext<'a>)>,
     fonts: Seen<'a>,
     targets: AnimationTargets,
 }
@@ -456,7 +541,7 @@ impl<'a> LifecycleCandidates<'a> {
             let independent = || {
                 self.requested
                     .as_ref()
-                    .is_some_and(|(requested, kind)| independent_effect(path, requested, *kind))
+                    .is_some_and(|(requested, query)| independent_effect(path, requested, *query))
             };
             match validate_animations(&element.style, self.definitions, independent) {
                 Ok(()) => {}
@@ -480,6 +565,7 @@ pub(crate) fn validate_with_lifecycle(
     rules: &[crate::live_stylesheets::ActiveRule],
     requested: Option<Query>,
     completed: &CompletedAnimations,
+    tree: Option<&turbo_dom_parser::rtdom::tree::Tree>,
 ) -> Result<bool, String> {
     let definitions = Definitions::collect(rules);
     // Only a full strict success permits sharing this layout across query targets.
@@ -501,7 +587,7 @@ pub(crate) fn validate_with_lifecycle(
         nodes,
         &definitions,
         &path,
-        query.kind,
+        QueryContext { query, tree },
         &mut Vec::new(),
         &mut Seen::new(),
         completed,
@@ -513,7 +599,7 @@ fn validate_rect_nodes<'a>(
     nodes: &'a [StyledNode],
     definitions: &Definitions,
     requested: &[&turbo_dom_layout::StyledElement],
-    kind: QueryKind,
+    query: QueryContext<'_>,
     path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
     seen: &mut Seen<'a>,
     completed: &CompletedAnimations,
@@ -536,13 +622,13 @@ fn validate_rect_nodes<'a>(
                 .source
                 .and_then(|source| completed.get(&source))
                 .is_some_and(|proof| proof.allows_style(&element.style)),
-            || independent_effect(path, requested, kind),
+            || independent_effect(path, requested, query),
         )?;
         validate_rect_nodes(
             &element.children,
             definitions,
             requested,
-            kind,
+            query,
             path,
             seen,
             completed,
@@ -753,7 +839,8 @@ mod definition_tests {
             resource: Some(definition("@keyframes fadeOut{0%{width:0}100%{width:100px}}").unwrap()),
             containers: Vec::new(),
         }];
-        let outcome = validate_or_request(&[], &rules, None, &Default::default(), false).unwrap();
+        let outcome =
+            validate_or_request(&[], &rules, None, &Default::default(), false, None).unwrap();
         assert!(matches!(outcome, Admission::Accepted(true)));
     }
 

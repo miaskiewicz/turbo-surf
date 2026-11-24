@@ -56,10 +56,36 @@ impl CacheKey {
 }
 
 #[derive(PartialEq)]
+enum DocumentInputVersion {
+    Full(u64),
+    Connected(turbo_dom_browser_env::host_internals::DocumentCheckpoint),
+}
+
+fn document_input_version(
+    scope: &mut v8::PinScope<'_, '_>,
+    input: &crate::live_layout_dom::NativeLayoutInput<'_>,
+) -> DocumentInputVersion {
+    // The input retains an owner witness, which may be an Element rather than a Document.
+    let checkpoint = (|| {
+        let _owner =
+            turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
+        let context = turbo_dom_browser_env::host_internals::current_document_context(scope)?;
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let root = turbo_dom_browser_env::host_internals::with_tree(|tree| tree.root())?;
+        let document = turbo_dom_browser_env::host_internals::wrap(scope, root);
+        turbo_dom_browser_env::host_internals::document_checkpoint(scope, document)
+    })();
+    checkpoint.map_or(
+        DocumentInputVersion::Full(input.tree.capture.tree_version),
+        DocumentInputVersion::Connected,
+    )
+}
+
+#[derive(PartialEq)]
 struct LayoutStateKey {
     realm: u64,
     document: u32,
-    version: u64,
+    version: DocumentInputVersion,
     width: u32,
     height: u32,
     layout_scale: u32,
@@ -543,25 +569,27 @@ fn zero_scroll_offsets(context: v8::Local<v8::Context>) -> bool {
         .values()
         .all(|offset| *offset == [0.0; 2])
 }
-fn resource_query_allowed(
+fn current_resource_query(
     input: &crate::live_layout_dom::NativeLayoutInput<'_>,
-    query: Query,
-) -> bool {
-    input.owner_context.is_some_and(zero_scroll_offsets)
-        && !(query.kind == QueryKind::ScrollExtent
-            && input.tree.capture.quirks
-            && input.tree.capture.body
-                == Some(crate::live_layout::source_id(
-                    input.tree.document_id(),
-                    query.source,
-                )))
+    mut query: Query,
+) -> Option<Query> {
+    query.retained_scroll = !zero_scroll_offsets(input.owner_context?);
+    (!(query.kind == QueryKind::ScrollExtent
+        && input.tree.capture.quirks
+        && input.tree.capture.body
+            == Some(crate::live_layout::source_id(
+                input.tree.document_id(),
+                query.source,
+            ))))
+    .then_some(query)
 }
 fn set_resource_query(input: &mut crate::live_layout_dom::NativeLayoutInput<'_>, kind: QueryKind) {
     let query = Query {
         source: input.handle,
         kind,
+        retained_scroll: false,
     };
-    input.tree.resource_query = resource_query_allowed(input, query).then_some(query);
+    input.tree.resource_query = current_resource_query(input, query);
 }
 
 fn measure<'s>(
@@ -785,13 +813,11 @@ fn resolve_layout_once<'s>(
     lifecycle_request: &mut Option<crate::live_layout_resources::AnimationNeedsLifecycle>,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
     refresh(scope, input)?;
-    if input
+    let query = input
         .tree
         .resource_query
-        .is_some_and(|query| !resource_query_allowed(input, query))
-    {
-        input.tree.resource_query = None;
-    }
+        .and_then(|query| current_resource_query(input, query));
+    input.tree.resource_query = query;
     let input = &*input;
     let (tree, sheets) = (&input.tree, input.sheets.as_slice());
     let key_timer =
@@ -812,7 +838,9 @@ fn resolve_layout_once<'s>(
         state: LayoutStateKey {
             realm: viewport.realm,
             document: tree.document_id(),
-            version: tree.capture.tree_version,
+            // This is solved-geometry equivalence only. Fresh live layout below
+            // still verifies the capture's original, full native storage version.
+            version: document_input_version(scope, input),
             width: viewport.width.to_bits(),
             height: viewport.height.to_bits(),
             layout_scale: viewport.layout_scale.to_bits(),

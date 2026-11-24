@@ -26,10 +26,10 @@ opt-level = 3
 lto = "thin"
 
 # Temporary immutable development pin: turbo-dom release/0.8.7 at
-# 28f6a629b1dea759aa83c103f29abbfd0b614ccb (DOM state, History, DOMParser and positioned checkbox geometry and sibling-rank and XPath value-admission and cached own-box proof and scroll/hit ownership fixes).
+# 99c32ec17e5218a06b7b65745810248e87c531b4 (DOM state, History, DOMParser and positioned checkbox geometry and sibling-rank and XPath value-admission and cached own-box proof and scroll/hit ownership and connected-document checkpoint fixes).
 # Replace with registry 0.8.7 after publication, before tagging Surf.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "28f6a629b1dea759aa83c103f29abbfd0b614ccb" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "28f6a629b1dea759aa83c103f29abbfd0b614ccb" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "28f6a629b1dea759aa83c103f29abbfd0b614ccb" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "28f6a629b1dea759aa83c103f29abbfd0b614ccb" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "99c32ec17e5218a06b7b65745810248e87c531b4" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "99c32ec17e5218a06b7b65745810248e87c531b4" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "99c32ec17e5218a06b7b65745810248e87c531b4" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "99c32ec17e5218a06b7b65745810248e87c531b4" }

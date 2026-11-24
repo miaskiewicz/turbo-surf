@@ -3,6 +3,8 @@
 ## [0.8.7] - 2026-11-24 (unreleased candidate)
 
 - Publish aborted intercepted fetch/XHR requests through the native event hub, with one request failure and no response or request-finished event.
+- Reuse solved layout across proven detached DOM construction using turbo-dom's native document checkpoint, retaining full-version capture and connected-mutation checks.
+- Admit unrelated paint/transform animations behind applicable isolated HTML clips during rectangle reads with retained scroll offsets; preserve unsupported dependencies and exclude top-layer escape cases.
 - Preserve the FormData constructor's native document across navigation and collection, including retained constructors and multipart uploads.
 - Distinguish superseded navigation from genuine target closure so existing interrupted-navigation handling receives the correct error.
 - Keep lifecycle history delivery independent of the initiating caller's deadline.

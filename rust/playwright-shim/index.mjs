@@ -35,9 +35,9 @@ import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs"
 import {
   emitNativeFrameNavigation,
   hasNativeHistory,
-  notifyNativeHistory,
+  notifyNativeHistoryAcknowledged,
   retiredNativeHistoryTarget,
-  syncNativeHistory,
+  syncNativeHistoryAcknowledged,
 } from "./history-snapshot.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
@@ -3231,7 +3231,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
   // over `this._html`) and a subsequent navigation see the post-interaction state.
   async _refreshHistory(collectScript) {
-    if (syncNativeHistory(this, native)) return { url: this._url };
+    if (await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline()))
+      return { url: this._url };
     try {
       const encoded = await collectScript(
         this._session,
@@ -3792,6 +3793,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return opener && !opener.isClosed() ? opener : null;
   }
 
+  _historyReadDeadline() {
+    let deadline = Infinity;
+    for (const owner of this._navigationResponseOwners ?? [])
+      if (owner.session === this._session)
+        deadline = Math.min(deadline, owner.deadline ?? Infinity);
+    return deadline;
+  }
+
   _nativeLoad() {
     return (this._nativeLoadState ??= new NativeLoadState(this));
   }
@@ -3801,11 +3810,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     closeScreenshotScene(this);
   }
 
-  _didNativeNavigate(event) {
+  async _didNativeNavigate(event) {
     if (retiredNativeHistoryTarget(this)) return;
     this._retireNativeDocumentAssets();
     this._nativeLoad().reset();
-    if (!syncNativeHistory(this, native))
+    if (!(await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline())))
       throw new Error("Native navigation has no owned history target");
     this._loadedPath = pathOf(this._url);
     if (this._actorHub.canReadTarget(this._targetId)) {
@@ -3815,8 +3824,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     emitNativeFrameNavigation(this, event.url);
   }
 
-  _didNativeHistoryChanged(event) {
-    notifyNativeHistory(this, native, event);
+  async _didNativeHistoryChanged(event) {
+    return notifyNativeHistoryAcknowledged(this, native, event, this._historyReadDeadline());
   }
 
   _navigationTimeoutFor(options) {
@@ -3917,7 +3926,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const { controller, milestone } = this._navigationMilestone(opts);
     // Resource traffic may evict the bounded history before this command's load
     // milestone. Retain only active owners' genuine main-document responses.
-    const responseOwner = { session, responses: new Map() };
+    const responseOwner = { session, deadline: bindingDeadline, responses: new Map() };
     (this._navigationResponseOwners ??= new Set()).add(responseOwner);
     this._driverNavigation = true;
     try {
@@ -3946,7 +3955,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
           this._remainingTargetIdleTimeout(opts, navigationStarted),
         );
       if (opts.waitUntil !== "commit") this._html = native.liveSerialize(session);
-      syncNativeHistory(this, native);
+      await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline());
       if (receipt.sameDocument === true) return null;
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
       const response = responseOwner.responses.get(String(receipt.requestId));
@@ -4228,7 +4237,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return resp;
   }
   async _traverseNativeHistory(direction, opts) {
-    syncNativeHistory(this, native);
+    await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline());
     const entry = direction === "back" ? this._history.at(-1) : this._fwd.at(-1);
     if (entry == null) return null;
     return this._navigateActorTarget(historyUrl(entry), undefined, undefined, {

@@ -366,3 +366,6 @@ export declare function liveActorConfigureEmulation(actor: number, optionsJson: 
 
 /** Completed actor bootstrap timeout outcome; reads host state without pumping guest code. */
 export function liveInitialHydrationStatus(id: number): string;
+
+/** Wait for private history acknowledgement without blocking host IO. Zero means no deadline. */
+export function liveTargetHistoryStateAsync(id: number, timeoutMs: number): Promise<string>;

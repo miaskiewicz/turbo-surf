@@ -2180,8 +2180,7 @@ pub fn live_target_network_state(id: u32) -> Result<String> {
 }
 
 /// Read one authenticated target's native history metadata without entering V8.
-#[napi]
-pub fn live_target_history_state(id: u32) -> Result<String> {
+fn history_snapshot_owner(id: u32) -> Result<(Arc<LiveActor>, String)> {
     let (actor, target) = {
         let live = live_registry()
             .lock()
@@ -2209,11 +2208,62 @@ pub fn live_target_history_state(id: u32) -> Result<String> {
     if info.closed || cancelling || actor.auxiliary.is_closed() {
         return Err(Error::from_reason("Native history target is closed"));
     }
+    Ok((actor, key))
+}
+
+#[napi]
+pub fn live_target_history_state(id: u32) -> Result<String> {
+    let (actor, key) = history_snapshot_owner(id)?;
     actor
         .history_log
         .snapshot(&key)
         .map(|value| value.to_string())
         .map_err(Error::from_reason)
+}
+
+pub struct LiveHistorySnapshotTask {
+    id: u32,
+    log: turbo_surf_render::NativeHistoryLog,
+    target: String,
+    deadline: Option<std::time::Instant>,
+}
+
+#[napi]
+impl Task for LiveHistorySnapshotTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        let value = self
+            .log
+            .snapshot_acknowledged(&self.target, self.deadline)
+            .map_err(Error::from_reason)?;
+        history_snapshot_owner(self.id)?;
+        Ok(value.to_string())
+    }
+
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Observe an acknowledged actor-owned publication without blocking host IO or
+/// queueing behind a navigation that may itself await a host response.
+#[napi]
+pub fn live_target_history_state_async(
+    id: u32,
+    timeout_ms: u32,
+) -> Result<AsyncTask<LiveHistorySnapshotTask>> {
+    let (actor, target) = history_snapshot_owner(id)?;
+    let deadline = (timeout_ms != 0).then(|| {
+        std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms))
+    });
+    Ok(AsyncTask::new(LiveHistorySnapshotTask {
+        id,
+        log: actor.history_log.clone(),
+        target,
+        deadline,
+    }))
 }
 
 /// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.

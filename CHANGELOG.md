@@ -2,6 +2,14 @@
 
 ## [0.8.7] - 2026-11-23 (unreleased candidate)
 
+- Observe locator assertions without waiting for unrelated background response bodies.
+- Preserve native target-read exceptions, including errors raised while serializing results.
+- Dispatch contained-control clicks at the actual target and skip pointer-transparent descendants that can detach during pointer events.
+- Read native and ARIA checked state after real clicks, including retained element handles.
+- Wait for proven finite, running, non-filling animations during locator readiness without changing animation presentation or caller deadlines.
+- Narrow dynamic CSS selector candidates by element type while preserving more selective ID/class buckets and live state matching.
+- Consume native History, DOMParser and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
+
 - Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.
 - Terminate observed response records when interrupted fetch operations are dropped.
 

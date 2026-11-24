@@ -11,18 +11,55 @@ function captureClickScroll() {
 export const clickScrollBootstrap = `(${captureClickScroll.toString()})();`;
 
 export function scrollClickTarget(element) {
-  const view = element.ownerDocument.defaultView;
+  const document = element.ownerDocument;
+  const view = document.defaultView;
+  const bodyOverflowIsViewport = (body, style) => {
+    const root = document.documentElement;
+    if (
+      body !== document.body ||
+      __tsNs.tcLocatorParent(body) !== root ||
+      root?.namespaceURI !== "http://www.w3.org/1999/xhtml" ||
+      root.localName !== "html" ||
+      body.localName !== "body" ||
+      style.display === "none" ||
+      !["", "none"].includes(style.contain)
+    )
+      return false;
+    const rootStyle = view.getComputedStyle(root);
+    return (
+      rootStyle.overflowX === "visible" &&
+      rootStyle.overflowY === "visible" &&
+      ["", "none"].includes(rootStyle.contain)
+    );
+  };
+  const fixedContainingBlock = (style) =>
+    ["transform", "translate", "rotate", "scale", "perspective", "filter", "backdropFilter"].some(
+      (name) => style[name] && style[name] !== "none",
+    ) ||
+    /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain) ||
+    /(?:^|[,\s])(?:transform|perspective|filter|backdrop-filter|contain)(?:[,\s]|$)/.test(
+      style.willChange,
+    ) ||
+    ["auto", "hidden"].includes(style.contentVisibility) ||
+    ["size", "inline-size"].includes(style.containerType);
   const clipBounds = () => {
+    let fixedEscapes = view.getComputedStyle(element).position === "fixed";
     const clip = { left: 0, top: 0, right: view.innerWidth, bottom: view.innerHeight };
     for (
       let parent = __tsNs.tcLocatorParent(element);
-      parent;
+      parent && parent !== element.ownerDocument.documentElement;
       parent = __tsNs.tcLocatorParent(parent)
     ) {
       const style = view.getComputedStyle(parent);
+      if (fixedEscapes && fixedContainingBlock(style)) fixedEscapes = false;
+      const applyClip = !fixedEscapes;
+      if (style.position === "fixed") fixedEscapes = true;
+      if (!applyClip) continue;
       const x = /^(auto|scroll|hidden|clip)$/.test(style.overflowX);
       const y = /^(auto|scroll|hidden|clip)$/.test(style.overflowY);
       if (!x && !y) continue;
+      // CSS Overflow 3 viewport propagation: the used body overflow is visible.
+      if (bodyOverflowIsViewport(parent, style)) continue;
       const box = parent.getBoundingClientRect();
       const left = box.left + parent.clientLeft;
       const top = box.top + parent.clientTop;

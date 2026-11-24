@@ -143,3 +143,86 @@ test("explicit click positions are computed after real scrolling and cannot esca
     assert.equal(await page.evaluate(() => events.length), 1);
   });
 });
+
+function standardsFixture(html, run) {
+  return fixture("<!doctype html>" + html, run);
+}
+
+test("BODY overflow propagated to its viewport does not become a short independent clip", async () => {
+  await standardsFixture(
+    styles +
+      '<style>body{height:40px;overflow:hidden}</style><div style="height:100px"></div>' +
+      control +
+      events,
+    async (page) => {
+      await page.locator("#root").click({ timeout: 1000 });
+      assert.equal((await page.evaluate(observed)).expanded, "true");
+      assert.equal(await page.locator("body").evaluate((body) => body.scrollTop), 0);
+    },
+  );
+});
+
+test("root nonvisible overflow retains the BODY element's actual independent scrollport", async () => {
+  await standardsFixture(
+    styles +
+      '<style>html{overflow:hidden}body{height:60px;overflow:hidden}</style><div style="height:100px"></div>' +
+      control +
+      events,
+    async (page) => {
+      await page.locator("#root").click({ timeout: 1000 });
+      assert.equal((await page.evaluate(observed)).expanded, "true");
+      assert.ok((await page.locator("body").evaluate((body) => body.scrollTop)) > 0);
+    },
+  );
+});
+
+test("containment cannot turn a genuine BODY clip into an allowed click", async () => {
+  for (const containment of ["body{contain:paint}", "html{contain:paint}"]) {
+    await standardsFixture(
+      styles +
+        "<style>body{height:40px;overflow:clip}" +
+        containment +
+        '</style><div style="height:100px"></div>' +
+        control +
+        events,
+      async (page) => {
+        await assert.rejects(
+          page.locator("#root").click({ timeout: 1000 }),
+          /outside the visible scrollport/,
+        );
+        assert.deepEqual(await page.evaluate(() => events), []);
+      },
+    );
+  }
+});
+
+test("fixed targets escape only ordinary intermediate overflow ancestors", async () => {
+  const html =
+    styles +
+    '<style>#clip{height:40px;overflow:clip}#root{position:fixed;top:300px}</style><div id="clip">' +
+    control +
+    "</div>" +
+    events;
+  await standardsFixture(html, async (page) => {
+    await page.locator("#root").click({ timeout: 1000 });
+    assert.equal((await page.evaluate(observed)).expanded, "true");
+    assert.equal(await page.evaluate(() => scrollY), 0);
+  });
+});
+
+test("a fixed containing block retains its genuine ancestor clip", async () => {
+  await standardsFixture(
+    styles +
+      '<style>#clip{height:40px;overflow:clip;contain:paint}#root{position:fixed;top:100px}</style><div id="clip">' +
+      control +
+      "</div>" +
+      events,
+    async (page) => {
+      await assert.rejects(
+        page.locator("#root").click({ timeout: 1000 }),
+        /outside the visible scrollport/,
+      );
+      assert.deepEqual(await page.evaluate(() => events), []);
+    },
+  );
+});

@@ -157,18 +157,29 @@ fn selector_sources(source: &str) -> Result<Vec<String>, String> {
     result.map_err(|_| "native selector source parsing failed".into())
 }
 fn candidate_seed(selector: &Selector<'_>) -> Option<String> {
+    let mut tag = None;
     for component in selector.iter_raw_match_order() {
         let (prefix, name) = match component {
             Component::Combinator(_) => break,
             Component::ID(value) => ("#", value.as_ref()),
             Component::Class(value) => (".", value.as_ref()),
+            Component::LocalName(value) => {
+                tag = Some(value.name.as_ref());
+                continue;
+            }
             _ => continue,
         };
-        let mut source = String::from(prefix);
-        cssparser::serialize_identifier(name, &mut source).ok()?;
-        return Some(source);
+        return candidate_identifier(prefix, name);
     }
-    None
+    // Keep the more selective ID/class buckets; a type-only bucket still avoids
+    // evaluating dynamic and positional selectors against unrelated elements.
+    tag.and_then(|name| candidate_identifier("", name))
+}
+
+fn candidate_identifier(prefix: &str, name: &str) -> Option<String> {
+    let mut source = String::from(prefix);
+    cssparser::serialize_identifier(name, &mut source).ok()?;
+    Some(source)
 }
 
 fn shadow_selector(selector: &Selector<'_>) -> bool {
@@ -747,6 +758,54 @@ mod tests {
         }
         targets.sort_by_key(|target| target.source.0);
         targets
+    }
+
+    #[test]
+    fn dynamic_type_candidates_bound_work_and_keep_live_and_namespace_matches() {
+        use turbo_dom_parser::rtdom::tree::FormProp;
+        let html = format!(
+            "<body>{}<section class=scope><input id=a type=checkbox><input id=b type=checkbox></section><svg><a id=svg-first></a><a id=svg-second></a><foreignObject><a id=html-link></a></foreignObject></svg>",
+            "<i></i>".repeat(1000)
+        );
+        let mut tree = Tree::parse(&html);
+        let a = tree.get_element_by_id("a").unwrap();
+        let b = tree.get_element_by_id("b").unwrap();
+        let css = ".scope > input:checked,svg > a:nth-of-type(2),foreignObject > a:first-of-type{width:10px}";
+        for checked in [false, true, false] {
+            tree.set_form_property(a, FormProp::Checked, checked);
+            tree.set_form_property(b, FormProp::Checked, !checked);
+            let graph = Composition::scopes(&tree).unwrap();
+            let expected = legacy_targets(&tree, tree.root(), &graph, css);
+            ORDINARY_MATCHES.with(|count| count.set(0));
+            let actual = prepared(&tree, tree.root(), &graph, css).targets;
+            assert_eq!(actual, expected);
+            assert_eq!(actual.len(), 3);
+            assert!(actual
+                .iter()
+                .any(|target| target.source == source_id(1, if checked { a } else { b })));
+            assert!(
+                ORDINARY_MATCHES.with(|count| count.get()) <= 8,
+                "unrelated elements reached dynamic matching: {}",
+                ORDINARY_MATCHES.with(|count| count.get())
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_type_candidates_keep_more_selective_class_buckets() {
+        let html = format!(
+            "<body>{}<input class=pick type=checkbox checked><input class=pick type=checkbox>",
+            "<input>".repeat(1000)
+        );
+        let tree = Tree::parse(&html);
+        let graph = Composition::scopes(&tree).unwrap();
+        let css = "input.pick:checked{width:10px}";
+        let expected = legacy_targets(&tree, tree.root(), &graph, css);
+        ORDINARY_MATCHES.with(|count| count.set(0));
+        let actual = prepared(&tree, tree.root(), &graph, css).targets;
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 1);
+        assert!(ORDINARY_MATCHES.with(|count| count.get()) <= 2);
     }
 
     #[test]

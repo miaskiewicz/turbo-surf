@@ -842,13 +842,29 @@ impl PageSession {
         let value = async_owner::with_document(scope, context, |scope| {
             crate::browser_env::run_engine_script(scope, source)
         })?
-        .ok_or("Target engine script failed")?;
+        .ok_or_else(|| {
+            if scope.has_terminated() || scope.is_execution_terminating() {
+                return "Target engine read execution terminated".to_owned();
+            }
+            scope
+                .exception()
+                .map(|error| error.to_rust_string_lossy(scope))
+                .unwrap_or_else(|| "Target engine script failed".to_owned())
+        })?;
         if value.is_promise() {
             return Err("Target engine read must return a synchronous value".into());
         }
         let result = v8::json::stringify(scope, value).map(|json| json.to_rust_string_lossy(scope));
         publish(scope);
-        result.ok_or_else(|| "Target engine result could not be serialized".to_owned())
+        result.ok_or_else(|| {
+            if scope.has_terminated() || scope.is_execution_terminating() {
+                return "Target engine read execution terminated".to_owned();
+            }
+            scope
+                .exception()
+                .map(|error| error.to_rust_string_lossy(scope))
+                .unwrap_or_else(|| "Target engine result could not be serialized".to_owned())
+        })
     }
 
     pub fn serialize_target(&mut self, target: u64) -> Result<String, String> {

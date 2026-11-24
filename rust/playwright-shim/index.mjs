@@ -673,6 +673,8 @@ const waitingVisibilitySource = `function(element) {
   const finiteGeometryTiming = ${finiteGeometryTiming.toString()};
   const unchangedGeometryAnimation = ${unchangedGeometryAnimation.toString()};
   const finiteGeometryReadiness = ${finiteGeometryReadiness.toString()};
+  try { return renderedVisibility(element); }
+  catch (error) { if (!animationReadinessName(error)) throw error; }
   const records = captureGeometryAnimations(element);
   try { return renderedVisibility(element); }
   catch (error) {

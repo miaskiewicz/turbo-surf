@@ -71,6 +71,26 @@ async function animationReadinessFixture(animation, run, ancestor = false) {
   }
 }
 
+test("supported visibility waits and clicks never query authored animation metadata", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      globalThis.metadataReads = 0;
+      Object.defineProperty(Element.prototype, "getAnimations", {
+        configurable: true,
+        get() {
+          metadataReads++;
+          throw new Error("authored-animation-metadata-must-not-run");
+        },
+      });
+    });
+    await target.waitFor({ state: "visible", timeout: 1000 });
+    await target.click({ timeout: 1000 });
+    assert.equal(await target.isVisible(), true);
+    assert.equal(await page.evaluate(() => metadataReads), 0);
+    assert.equal(await page.evaluate(() => readinessClicks), 1);
+  });
+});
+
 test("visible waits observe finite animation completion while direct reads remain honest", async () => {
   await animationReadinessFixture("entrance 300ms linear", async (page, target) => {
     await assert.rejects(target.isVisible(), /animation resource.*entrance/);
@@ -190,7 +210,7 @@ test("waiter error policy preserves session-budget failure identity", async (con
   });
 });
 
-test("animation error names without a relevant finite effect are not retry signals", async () => {
+test("animation error names without a relevant finite effect never start waiter polling", async (context) => {
   await animationReadinessFixture("none", async (page, target) => {
     await page.evaluate(() => {
       globalThis.unprovenReads = 0;
@@ -199,12 +219,39 @@ test("animation error names without a relevant finite effect are not retry signa
         throw new Error("native live layout animation resource is unsupported: unrelated");
       };
     });
+    let hostPolls = 0;
+    const original = page._redrain.bind(page);
+    const pump = context.mock.method(page, "_redrain", async () => {
+      hostPolls++;
+      return original();
+    });
     await assert.rejects(
       target.waitFor({ state: "visible", timeout: 1000 }),
       /unsupported: unrelated/,
     );
     await assert.rejects(target.click({ timeout: 1000 }), /unsupported: unrelated/);
-    assert.equal(await page.evaluate(() => unprovenReads), 2);
+    assert.equal(hostPolls, 0);
+    pump.mock.restore();
+    const reads = await page.evaluate(() => unprovenReads);
+    assert.ok(reads >= 2 && reads <= 4, "only a bounded same-task revalidation is allowed");
+    assert.equal(await page.evaluate(() => readinessClicks), 0);
+  });
+});
+
+test("a classified first guard can revalidate supported geometry without a lingering effect", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      globalThis.completedGeometryReads = 0;
+      const element = document.getElementById("target");
+      const nativeRect = element.getBoundingClientRect;
+      element.getBoundingClientRect = function () {
+        if (++completedGeometryReads === 1)
+          throw new Error("native live layout animation resource is unsupported: completed");
+        return nativeRect.call(this);
+      };
+    });
+    await target.waitFor({ state: "visible", timeout: 1000 });
+    assert.equal(await page.evaluate(() => completedGeometryReads), 2);
     assert.equal(await page.evaluate(() => readinessClicks), 0);
   });
 });

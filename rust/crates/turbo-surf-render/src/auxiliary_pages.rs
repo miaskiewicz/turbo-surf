@@ -430,7 +430,7 @@ pub(super) fn admitted(
             snapshot,
             activity: Some(network.begin_page_navigation(&request.target_id.0.to_string())),
         });
-        auxiliary_navigation::cancel(&mut state, request.target_id.0);
+        auxiliary_navigation::supersede(&mut state, request.target_id.0);
     }
 }
 
@@ -622,7 +622,7 @@ pub(super) fn queue_navigation_mode(
         snapshot,
         activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
-    auxiliary_navigation::cancel(&mut state, target.0);
+    auxiliary_navigation::supersede(&mut state, target.0);
     true
 }
 
@@ -1589,7 +1589,7 @@ pub(super) fn queue_history_navigation(
         snapshot,
         activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
-    auxiliary_navigation::cancel(&mut state, target.0);
+    auxiliary_navigation::supersede(&mut state, target.0);
     Ok(())
 }
 

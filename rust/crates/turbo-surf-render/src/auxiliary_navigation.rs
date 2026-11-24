@@ -328,22 +328,28 @@ pub(super) fn pending(state: &OpState) -> bool {
 }
 
 pub(super) fn cancel(state: &mut OpState, target: u64) {
+    cancel_with_error(state, target, "Navigation target closed or superseded");
+}
+
+pub(super) fn supersede(state: &mut OpState, target: u64) {
+    cancel_with_error(
+        state,
+        target,
+        "Navigation interrupted by another navigation",
+    );
+}
+
+fn cancel_with_error(state: &mut OpState, target: u64, error: &str) {
     let state = self::state(state);
     state.action_commits.remove(&target);
     if let Some(job) = state.jobs.remove(&target) {
         if state.waiters.contains(&job.generation) {
-            state.results.insert(
-                job.generation,
-                Err("Navigation target closed or superseded".into()),
-            );
+            state.results.insert(job.generation, Err(error.into()));
         }
     }
     if let Some(init) = state.pending_init.remove(&target) {
         if state.waiters.contains(&init.job.generation) {
-            state.results.insert(
-                init.job.generation,
-                Err("Navigation target closed or superseded".into()),
-            );
+            state.results.insert(init.job.generation, Err(error.into()));
         }
     }
     state.loading.remove(&target);
@@ -517,7 +523,7 @@ fn start(
             .borrow::<NetworkLog>()
             .begin_page_navigation(&target.0.to_string())
     });
-    cancel(&mut shared, target.0);
+    supersede(&mut shared, target.0);
     let driver_navigation = navigation.snapshot.request.driver_navigation;
     let form_action = navigation.snapshot.request.form_action;
     let future = fetch_job(&shared, navigation, frame, budget_ms);

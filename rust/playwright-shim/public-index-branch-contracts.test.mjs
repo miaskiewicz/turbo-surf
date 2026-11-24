@@ -78,7 +78,7 @@ test("invalid select choices preserve selection and events before valid clearing
   assert.equal(await page.evaluate(() => selectionEvents), 2);
 });
 
-test("missing locator reads remain empty while inner-text array assertions reflect actual hidden content changes", async (t) => {
+test("missing value reads time out while other missing reads and inner-text arrays preserve their contracts", async (t) => {
   const page = await pageWith(
     t,
     '<p class="item">Visible<span hidden>Secret</span></p><input id="healthy" value="ready">',
@@ -86,7 +86,7 @@ test("missing locator reads remain empty while inner-text array assertions refle
   const missing = page.locator("#absent");
   assert.equal(await missing.getAttribute("id"), null);
   assert.equal(await missing.innerText(), "");
-  assert.equal(await missing.inputValue(), "");
+  await assert.rejects(missing.inputValue({ timeout: 25 }), /state=attached.*timed out/);
   assert.equal(await missing.ariaRole(), null);
   assert.equal(await missing.accessibleName(), "");
   assert.equal(await missing.cssValue("color"), "");

@@ -91,3 +91,24 @@ async fn explicit_viewport_options_set_actual_window_and_root_dimensions() {
     ).await.unwrap();
     assert_eq!(result, "[640,480,640,480]");
 }
+
+#[tokio::test]
+async fn cached_own_none_admission_keeps_visible_and_mutated_style_elements_on_normal_geometry() {
+    let mut session =
+        page(r#"<!doctype html><body><style id=subject>/* default none */</style>body</body>"#)
+            .await;
+    let actual=session.eval_json_expression(r#"(()=>{
+      const element=document.getElementById('subject');
+      const read=()=>{getComputedStyle(element).position;const r=element.getBoundingClientRect();return [r.width,r.height,element.getClientRects().length]};
+      const results=[read()];
+      element.style.cssText='display:block;width:40px;height:20px';results.push(read());
+      element.style.cssText='display:none';results.push(read());
+      document.styleSheets[0].insertRule('#subject{display:block!important;width:31px;height:17px}',0);results.push(read());
+      let brand=false;try{Element.prototype.getBoundingClientRect.call({})}catch(error){brand=error instanceof TypeError;}
+      return {results,brand};
+    })()"#).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        serde_json::json!({"results":[[0,0,0],[40,20,1],[0,0,0],[31,17,1]],"brand":true})
+    );
+}

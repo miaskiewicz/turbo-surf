@@ -421,7 +421,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectangle(ops.op_live_element_geometry(this, true).bounds);
+        return rectangle(ops.op_live_element_geometry(this, true, true).bounds);
       },
       "getBoundingClientRect",
       0,
@@ -435,7 +435,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectList(ops.op_live_element_geometry(this, true).rects);
+        return rectList(ops.op_live_element_geometry(this, true, true).rects);
       },
       "getClientRects",
       0,
@@ -461,7 +461,7 @@
             const viewport = ops.op_live_viewport_client(this);
             if (viewport !== null) return viewport[name === "clientWidth" ? 0 : 1];
           }
-          return ops.op_live_element_geometry(this, true)[group][field];
+          return ops.op_live_element_geometry(this, true, false)[group][field];
         },
         "get " + name,
         0,

@@ -146,7 +146,7 @@
       if (!apply(connected, target, [])) return null;
       let geometry;
       try {
-        geometry = ops.op_live_element_geometry(target, true);
+        geometry = ops.op_live_element_geometry(target, true, false);
       } catch {
         return null;
       }

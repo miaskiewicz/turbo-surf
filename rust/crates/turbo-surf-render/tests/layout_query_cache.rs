@@ -410,3 +410,54 @@ async fn raw_sheet_reuse_tracks_native_media_disabled_rules_and_sheet_identity()
     );
     page.close();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn warmed_own_none_rectangles_do_not_enter_layout_capture() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style id=sheet>input{box-sizing:border-box;width:40px;height:20px}</style>
+      <body><input id=visible><script>
+      const subject=document.getElementById('sheet');
+      globalThis.position=getComputedStyle(subject).position;
+      globalThis.hiddenRects=Array.from({length:12},()=>{
+        const rect=subject.getBoundingClientRect();
+        return [rect.x,rect.y,rect.width,rect.height,subject.getClientRects().length];
+      });
+      globalThis.visibleWidth=document.getElementById('visible').getBoundingClientRect().width;
+      </script>"#;
+    let (mut page, profile, directory) = profiled_page("cached-own-none", html).await;
+    assert_eq!(
+        page.eval_json_expression("hiddenRects").await.unwrap(),
+        serde_json::to_string(&vec![vec![0; 5]; 12]).unwrap()
+    );
+    assert_eq!(
+        page.eval_expression("String(visibleWidth)").await.unwrap(),
+        "40"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(
+        profile["cacheHits"], 0,
+        "proven empty rect reads must return before capture and layout cache lookup"
+    );
+    page.close();
+    drop(directory);
+    let metric_html = html.replace(
+        "globalThis.visibleWidth=",
+        "globalThis.clientWidth=subject.clientWidth;globalThis.visibleWidth=",
+    );
+    let (mut page, metric_profile, _directory) =
+        profiled_page("cached-own-none-metric", &metric_html).await;
+    assert_eq!(
+        page.eval_expression("String(globalThis.clientWidth)")
+            .await
+            .unwrap(),
+        "0"
+    );
+    let calls = |value: &serde_json::Value| {
+        value["cacheHits"].as_u64().unwrap_or(0) + value["cacheMisses"].as_u64().unwrap_or(0)
+    };
+    assert!(
+        calls(&metric_profile) > calls(&profile),
+        "client metrics must keep their normal native geometry path"
+    );
+    page.close();
+}

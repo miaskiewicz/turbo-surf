@@ -2,6 +2,10 @@
 
 ## [0.8.7] - 2026-11-23 (unreleased candidate)
 
+- Wait for attached input controls when reading their values, preserving empty values and missing-element timeouts.
+- Keep native history URLs authoritative during RSC refreshes and wait for private history acknowledgements without occupying the host worker pool.
+- Scroll real click targets within their owning viewport and scroll containers before computing hit coordinates.
+- Return empty visual rectangles from a current native cached own-display-none proof before layout capture, preserving the normal path for uncertain geometry and all client/offset/observer metrics.
 - Observe locator assertions without waiting for unrelated background response bodies.
 - Preserve native target-read exceptions, including errors raised while serializing results.
 - Dispatch contained-control clicks at the actual target and skip pointer-transparent descendants that can detach during pointer events.

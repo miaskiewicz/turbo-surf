@@ -526,8 +526,9 @@ pub(crate) fn op_live_element_geometry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     visual_rect: bool,
+    rect_only: bool,
 ) -> Result<Geometry, JsErrorBox> {
-    measure(scope, receiver, visual_rect).map_err(|error| {
+    measure(scope, receiver, visual_rect, rect_only).map_err(|error| {
         if error == "Illegal invocation" {
             JsErrorBox::type_error(error)
         } else {
@@ -567,7 +568,17 @@ fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     visual_rect: bool,
+    rect_only: bool,
 ) -> Result<Geometry, String> {
+    // The cache proof covers rectangles; client/offset metrics keep their normal capture.
+    if rect_only
+        && turbo_dom_browser_env::host_internals::cached_own_box(scope, receiver)
+            == turbo_dom_browser_env::host_internals::CachedOwnBox::DisplayNone
+    {
+        return Ok(geometry_value(
+            turbo_dom_layout::cssom_view::metrics::empty_geometry(),
+        ));
+    }
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     if visual_rect {
         set_resource_query(&mut input, QueryKind::LocalBox);
@@ -604,13 +615,16 @@ fn measure<'s>(
         }
         geometry
     };
+    Ok(geometry_value(geometry))
+}
+fn geometry_value(geometry: turbo_dom_layout::cssom_view::metrics::ElementGeometry) -> Geometry {
     let rect = |r: turbo_dom_layout::layout_snapshot::Rect| [r.x, r.y, r.width, r.height];
-    Ok(Geometry {
+    Geometry {
         bounds: rect(geometry.bounds),
         rects: geometry.rects.into_iter().map(rect).collect(),
         client: geometry.client,
         offset: geometry.offset,
-    })
+    }
 }
 /// Offset and client metrics report an element's own unzoomed CSS pixels: the
 /// pixel-snapped layout value divided by its effective zoom, then rounded.

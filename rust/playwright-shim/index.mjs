@@ -1221,11 +1221,14 @@ class Locator {
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }
-  async inputValue() {
-    await this._prepareQuery();
-    if (this._page._live) return (await this._liveRead((el) => el.value)) ?? "";
-    const n = this._node();
-    return n == null ? "" : native.inputValueOf(this._html, n);
+  async inputValue(options = {}) {
+    await this.waitFor({ state: "attached", timeout: options.timeout ?? 30000 });
+    return this._liveRead((element) => {
+      if (!["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)) {
+        throw new Error("Element is not an <input>, <textarea> or <select> element");
+      }
+      return element.value;
+    });
   }
   async isVisible() {
     await this._prepareQuery();

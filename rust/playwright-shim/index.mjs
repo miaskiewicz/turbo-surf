@@ -3823,7 +3823,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (retiredNativeHistoryTarget(this)) return;
     this._retireNativeDocumentAssets();
     this._nativeLoad().reset();
-    if (!(await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline())))
+    if (!(await syncNativeHistoryAcknowledged(this, native)))
       throw new Error("Native navigation has no owned history target");
     this._loadedPath = pathOf(this._url);
     if (this._actorHub.canReadTarget(this._targetId)) {
@@ -3834,7 +3834,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _didNativeHistoryChanged(event) {
-    return notifyNativeHistoryAcknowledged(this, native, event, this._historyReadDeadline());
+    return notifyNativeHistoryAcknowledged(this, native, event);
   }
 
   _navigationTimeoutFor(options) {

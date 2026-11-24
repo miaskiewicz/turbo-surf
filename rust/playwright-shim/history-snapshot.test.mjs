@@ -375,3 +375,31 @@ test("ready acknowledged metadata never enters an asynchronous worker", async ()
   assert.equal(await syncNativeHistoryAcknowledged(f.page, f.native), true);
   assert.equal(f.page._url, "/same");
 });
+
+test("already acknowledged publication does not invent an expired wait", async () => {
+  const f = fixture();
+  let waits = 0;
+  f.native.liveTargetHistoryStateAsync = () => {
+    waits++;
+    throw new Error("unexpected wait");
+  };
+  assert.equal(await syncNativeHistoryAcknowledged(f.page, f.native, Date.now() - 1), true);
+  assert.equal(waits, 0);
+  assert.equal(f.page._url, "/same");
+});
+
+test("an expired observer cannot replace a fatal native publication error", async () => {
+  const f = fixture();
+  const error = new Error("Native history metadata lock poisoned");
+  f.native.liveTargetHistoryState = () => {
+    throw error;
+  };
+  f.native.liveTargetHistoryStateAsync = () => {
+    throw new Error("unexpected wait");
+  };
+  await assert.rejects(
+    syncNativeHistoryAcknowledged(f.page, f.native, Date.now() - 1),
+    (actual) => actual === error,
+  );
+  assert.equal(f.page._url, "/raw");
+});

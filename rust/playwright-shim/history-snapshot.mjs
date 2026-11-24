@@ -106,11 +106,6 @@ export async function syncNativeHistoryAcknowledged(page, native, deadline = Inf
   const session = page._session;
   const target = page._targetId;
   const owner = page._actorHub;
-  const remaining = Number.isFinite(deadline) ? deadline - Date.now() : 0;
-  if (Number.isFinite(deadline) && remaining <= 0)
-    throw Object.assign(new Error("Native history acknowledgement wait timed out"), {
-      name: "TimeoutError",
-    });
   let encoded;
   try {
     try {
@@ -118,6 +113,11 @@ export async function syncNativeHistoryAcknowledged(page, native, deadline = Inf
     } catch (error) {
       if (error.message !== "Native history mutation is awaiting private acknowledgement")
         throw error;
+      const remaining = Number.isFinite(deadline) ? deadline - Date.now() : 0;
+      if (Number.isFinite(deadline) && remaining <= 0)
+        throw Object.assign(new Error("Native history acknowledgement wait timed out"), {
+          name: "TimeoutError",
+        });
       encoded = await native.liveTargetHistoryStateAsync(session, Math.ceil(remaining));
     }
   } catch (error) {

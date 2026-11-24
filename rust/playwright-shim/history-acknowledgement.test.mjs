@@ -147,3 +147,57 @@ test(
     assert.doesNotMatch(stdout, /starved/);
   },
 );
+
+test(
+  "autonomous native lifecycle publication ignores an injected expired observer",
+  { timeout: 5000 },
+  async () => {
+    await fixture("<body>ready</body>", async (page, origin) => {
+      await page.goto(origin + "/ready", { waitUntil: "load", timeout: 1000 });
+      assert.equal(await page.evaluate(() => document.body.textContent), "ready");
+      const hub = page._actorHub;
+      const originalEvent = hub.callbacks.navigated;
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      let observed;
+      const delivered = new Promise((resolve) => {
+        observed = resolve;
+      });
+      hub.callbacks.navigated = async (target, event) => {
+        // A test-owned observer record, not a fabricated native transaction or a
+        // changed real caller deadline. The event and publication are genuine.
+        const observer = {
+          session: target._session,
+          deadline: Date.now() - 1,
+          responses: new Map(),
+        };
+        target._navigationResponseOwners.add(observer);
+        try {
+          const result = await originalEvent(target, event);
+          observed({ error: null, event });
+          return result;
+        } catch (error) {
+          observed({ error, event });
+          throw error;
+        } finally {
+          observer.responses.clear();
+          target._navigationResponseOwners.delete(observer);
+        }
+      };
+      const navigation = page.goto(origin + "/changed", { waitUntil: "load", timeout: 0 });
+      navigation.catch(() => {});
+      try {
+        const result = await delivered;
+        assert.equal(result.error, null);
+        assert.equal(result.event.target, page._targetId);
+        assert.equal(result.event.url, origin + "/changed");
+        assert.equal((await navigation).status(), 200);
+        assert.equal(page.url(), origin + "/changed");
+        assert.deepEqual(errors, []);
+        await page.goto(origin + "/ready", { waitUntil: "load", timeout: 1000 });
+      } finally {
+        hub.callbacks.navigated = originalEvent;
+      }
+    });
+  },
+);

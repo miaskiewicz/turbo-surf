@@ -3448,8 +3448,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
+  _retainNavigationResponse(entry, response) {
+    if (entry.id != null && entry.context?.navigation && entry.context.frame?.path?.length === 0) {
+      const session = this._session ?? this._openingNetworkId;
+      for (const owner of this._navigationResponseOwners ?? []) {
+        if (owner.session === session) owner.responses.set(String(entry.id), response);
+      }
+    }
+  }
+
   _emitNetworkResponse(entry, previousHop) {
     const { response, lifecycle } = this._captureNetworkResponse(entry);
+    this._retainNavigationResponse(entry, response);
     if (
       entry.redirectHop > 0 &&
       previousHop &&
@@ -3826,6 +3836,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const session = this._session;
     const bindingDeadline = this._navigationBindingDeadline(opts);
     const { controller, milestone } = this._navigationMilestone(opts);
+    // Resource traffic may evict the bounded history before this command's load
+    // milestone. Retain only active owners' genuine main-document responses.
+    const responseOwner = { session, responses: new Map() };
+    (this._navigationResponseOwners ??= new Set()).add(responseOwner);
     this._driverNavigation = true;
     try {
       const receipt = JSON.parse(
@@ -3856,15 +3870,15 @@ return String(globalThis.__RESULT ?? ""); })()`,
       syncNativeHistory(this, native);
       if (receipt.sameDocument === true) return null;
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
-      const response = this._recentResponses?.findLast(
-        (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
-      );
+      const response = responseOwner.responses.get(String(receipt.requestId));
       if (!response)
         throw new Error("Native navigation completed without an owned navigation response");
       return response;
     } catch (error) {
       throw this._targetNavigationError(error);
     } finally {
+      responseOwner.responses.clear();
+      this._navigationResponseOwners.delete(responseOwner);
       controller.abort(new Error("Navigation event wait ended"));
       this._driverNavigation = false;
     }

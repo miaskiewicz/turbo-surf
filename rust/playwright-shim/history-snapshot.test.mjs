@@ -255,8 +255,16 @@ test("retired targets skip native reads and listener errors preserve the latest 
   assert.equal(f.page._url, "/same");
 });
 
-test("acknowledged history read waits for owned publication without reading pending metadata", async () => {
+function pendingFixture() {
   const f = fixture();
+  f.native.liveTargetHistoryState = () => {
+    throw new Error("Native history mutation is awaiting private acknowledgement");
+  };
+  return f;
+}
+
+test("acknowledged history read waits for owned publication without reading pending metadata", async () => {
+  const f = pendingFixture();
   let publish;
   let calls = 0;
   f.native.liveTargetHistoryState = () => {
@@ -280,7 +288,7 @@ test("acknowledged history read waits for owned publication without reading pend
 });
 
 test("acknowledged history preserves the caller deadline and native timeout error", async () => {
-  const f = fixture();
+  const f = pendingFixture();
   let calls = 0;
   const error = new Error("Native history acknowledgement wait timed out");
   f.native.liveTargetHistoryStateAsync = async (_id, timeout) => {
@@ -305,7 +313,7 @@ test("acknowledged history does not retry or replace genuine native errors", asy
     "Native history target is closed",
     "Native history mutation is awaiting private acknowledgement",
   ]) {
-    const f = fixture();
+    const f = pendingFixture();
     let calls = 0;
     const error = new Error(message);
     f.native.liveTargetHistoryStateAsync = async () => {
@@ -322,7 +330,7 @@ test("acknowledged history does not retry or replace genuine native errors", asy
 });
 
 test("acknowledged history cannot apply a snapshot after its actual Page owner changes", async () => {
-  const f = fixture();
+  const f = pendingFixture();
   let publish;
   f.native.liveTargetHistoryStateAsync = () =>
     new Promise((resolve) => {
@@ -336,7 +344,7 @@ test("acknowledged history cannot apply a snapshot after its actual Page owner c
 });
 
 test("history notifications wait for acknowledgement before publishing ordered events", async () => {
-  const f = fixture();
+  const f = pendingFixture();
   let publish;
   f.native.liveTargetHistoryStateAsync = () =>
     new Promise((resolve) => {
@@ -357,4 +365,13 @@ test("history notifications wait for acknowledgement before publishing ordered e
   assert.equal(await notifying, true);
   assert.equal(f.events.length, 1);
   assert.equal(f.page._nativeHistoryEvent.revision, "9");
+});
+
+test("ready acknowledged metadata never enters an asynchronous worker", async () => {
+  const f = fixture();
+  f.native.liveTargetHistoryStateAsync = () => {
+    throw new Error("unnecessary async read");
+  };
+  assert.equal(await syncNativeHistoryAcknowledged(f.page, f.native), true);
+  assert.equal(f.page._url, "/same");
 });

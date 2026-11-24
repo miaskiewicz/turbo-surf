@@ -113,7 +113,13 @@ export async function syncNativeHistoryAcknowledged(page, native, deadline = Inf
     });
   let encoded;
   try {
-    encoded = await native.liveTargetHistoryStateAsync(session, Math.ceil(remaining));
+    try {
+      encoded = native.liveTargetHistoryState(session);
+    } catch (error) {
+      if (error.message !== "Native history mutation is awaiting private acknowledgement")
+        throw error;
+      encoded = await native.liveTargetHistoryStateAsync(session, Math.ceil(remaining));
+    }
   } catch (error) {
     if (error.message === "Native history acknowledgement wait timed out")
       error.name = "TimeoutError";

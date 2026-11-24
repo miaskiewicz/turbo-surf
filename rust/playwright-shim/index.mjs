@@ -3972,6 +3972,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
         throw new Error("Native navigation completed without an owned navigation response");
       return response;
     } catch (error) {
+      if (error.message === "Native history acknowledgement wait timed out")
+        throw Object.assign(
+          new Error(`Target navigation timeout after ${this._navigationTimeoutFor(opts)}ms`, {
+            cause: error,
+          }),
+          { name: "TimeoutError" },
+        );
       throw this._targetNavigationError(error);
     } finally {
       responseOwner.responses.clear();

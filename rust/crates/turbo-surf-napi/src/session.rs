@@ -2221,49 +2221,27 @@ pub fn live_target_history_state(id: u32) -> Result<String> {
         .map_err(Error::from_reason)
 }
 
-pub struct LiveHistorySnapshotTask {
-    id: u32,
-    log: turbo_surf_render::NativeHistoryLog,
-    target: String,
-    deadline: Option<std::time::Instant>,
-}
-
-#[napi]
-impl Task for LiveHistorySnapshotTask {
-    type Output = String;
-    type JsValue = String;
-
-    fn compute(&mut self) -> Result<String> {
-        let value = self
-            .log
-            .snapshot_acknowledged(&self.target, self.deadline)
-            .map_err(Error::from_reason)?;
-        history_snapshot_owner(self.id)?;
-        Ok(value.to_string())
-    }
-
-    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
-        Ok(value)
-    }
-}
-
-/// Observe an acknowledged actor-owned publication without blocking host IO or
-/// queueing behind a navigation that may itself await a host response.
+/// Wait on an owned publication without occupying the libuv pool that active
+/// navigation/host-route commands need to finish. Deadline includes queue time.
 #[napi]
 pub fn live_target_history_state_async(
+    env: Env,
     id: u32,
     timeout_ms: u32,
-) -> Result<AsyncTask<LiveHistorySnapshotTask>> {
+) -> Result<napi::JsObject> {
     let (actor, target) = history_snapshot_owner(id)?;
     let deadline = (timeout_ms != 0).then(|| {
         std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms))
     });
-    Ok(AsyncTask::new(LiveHistorySnapshotTask {
-        id,
-        log: actor.history_log.clone(),
-        target,
-        deadline,
-    }))
+    env.spawn_future(async move {
+        let value = actor
+            .history_log
+            .snapshot_acknowledged_async(&target, deadline)
+            .await
+            .map_err(Error::from_reason)?;
+        history_snapshot_owner(id)?;
+        Ok(value.to_string())
+    })
 }
 
 /// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.

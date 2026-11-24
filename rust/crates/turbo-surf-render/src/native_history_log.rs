@@ -11,13 +11,15 @@ pub struct NativeHistoryLog(Arc<HistorySnapshots>);
 struct HistorySnapshots {
     targets: Mutex<BTreeMap<String, Option<Value>>>,
     changed: Condvar,
+    ready: tokio::sync::Notify,
 }
 
-struct PublicationWake<'a>(&'a Condvar);
+struct PublicationWake<'a>(&'a HistorySnapshots);
 
 impl Drop for PublicationWake<'_> {
     fn drop(&mut self) {
-        self.0.notify_all();
+        self.0.changed.notify_all();
+        self.0.ready.notify_waiters();
     }
 }
 
@@ -40,7 +42,7 @@ impl NativeHistoryLog {
             return Err("Native history metadata identity is unavailable".into());
         }
         // Notify after the lock drops even if a native publication unwinds.
-        let _wake = PublicationWake(&self.0.changed);
+        let _wake = PublicationWake(&self.0);
         let mut targets = self
             .0
             .targets
@@ -69,6 +71,47 @@ impl NativeHistoryLog {
             return Err("Native history mutation is awaiting private acknowledgement".into());
         }
         Ok(snapshot.clone())
+    }
+
+    /// Subscribe before checking metadata so a private ACK cannot be lost. This
+    /// future occupies neither an actor job nor a blocking Node worker-pool slot.
+    pub async fn snapshot_acknowledged_async(
+        &self,
+        target: &str,
+        deadline: Option<Instant>,
+    ) -> Result<Value, String> {
+        self.snapshot_acknowledged_async_with(target, deadline, || {})
+            .await
+    }
+
+    async fn snapshot_acknowledged_async_with(
+        &self,
+        target: &str,
+        deadline: Option<Instant>,
+        mut pending: impl FnMut(),
+    ) -> Result<Value, String> {
+        loop {
+            let notified = self.0.ready.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Err("Native history acknowledgement wait timed out".into());
+            }
+            match self.snapshot(target) {
+                Ok(snapshot) => return Ok(snapshot),
+                Err(error)
+                    if error == "Native history mutation is awaiting private acknowledgement" => {}
+                Err(error) => return Err(error),
+            }
+            pending();
+            if let Some(deadline) = deadline {
+                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), notified)
+                    .await
+                    .map_err(|_| "Native history acknowledgement wait timed out")?;
+            } else {
+                notified.await;
+            }
+        }
     }
 
     /// Wait on publication, never behind an actor job that may need the host's IO.
@@ -134,6 +177,7 @@ impl NativeHistoryLog {
             .ok_or("Native target history is not initialized")?;
         *target = None;
         self.0.changed.notify_all();
+        self.0.ready.notify_waiters();
         Ok(())
     }
 }
@@ -309,5 +353,62 @@ mod tests {
         .join()
         .is_err());
         assert!(task.join().unwrap().unwrap_err().contains("poisoned"));
+    }
+    #[tokio::test]
+    async fn async_read_does_not_lose_ack_between_snapshot_and_notification_await() {
+        let log = NativeHistoryLog::default();
+        log.update("20", json!({"revision":"2","pendingTransaction":"ticket"}))
+            .unwrap();
+        let snapshot = log
+            .snapshot_acknowledged_async_with(
+                "20",
+                Some(Instant::now() + std::time::Duration::from_secs(1)),
+                || {
+                    log.update("20", json!({"revision":"2"})).unwrap();
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(snapshot["revision"], "2");
+    }
+
+    #[tokio::test]
+    async fn async_read_preserves_deadline_closed_unknown_and_poison_errors() {
+        let log = NativeHistoryLog::default();
+        log.update("20", json!({"revision":"2","pendingTransaction":"ticket"}))
+            .unwrap();
+        assert!(log
+            .snapshot_acknowledged_async(
+                "20",
+                Some(Instant::now() + std::time::Duration::from_millis(1))
+            )
+            .await
+            .unwrap_err()
+            .contains("timed out"));
+        assert!(log.snapshot("20").unwrap_err().contains("acknowledgement"));
+        assert!(log
+            .snapshot_acknowledged_async_with("20", None, || {
+                log.close("20").unwrap();
+            })
+            .await
+            .unwrap_err()
+            .contains("closed"));
+        assert!(log
+            .snapshot_acknowledged_async("missing", None)
+            .await
+            .unwrap_err()
+            .contains("not initialized"));
+        let writer = log.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = writer.0.targets.lock().unwrap();
+            panic!("poison fixture");
+        })
+        .join()
+        .is_err());
+        assert!(log
+            .snapshot_acknowledged_async("20", None)
+            .await
+            .unwrap_err()
+            .contains("poisoned"));
     }
 }

@@ -7,13 +7,11 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
-uses the published crates.io releases of `turbo-dom`, `turbo-dom-layout`,
-`turbo-dom-raster` and `turbo-dom-browser-env` 0.8.4, with their archive checksums
-recorded in `Cargo.lock`; no DOM Git override is required. The single V8 binding is
-the published `turbo-dom-v8` 150.4.2. The four DOM archives' source and original
-manifests were compared byte-for-byte with reviewed producer commit
-`688a1e3f4197c4fdf5ec55f3ab1c98da642e4948`; registry consumer checks remain a
-separate gate from earlier Git-source executions. Normal Cargo resolution also reuses the already-locked `windows-sys` 0.59.0 for five Windows-only dependency edges previously using 0.52.0; package versions and the macOS runtime feature graph are unchanged. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
+pins `turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster` and
+`turbo-dom-browser-env` 0.8.7 to one development revision until the registry
+archives are available. See [Cargo.lock](Cargo.lock) for resolved sources and
+[the publication procedure](../PUBLISHING.md) for the registry cutover. The single
+V8 binding is the registry `turbo-dom-v8` 150.4.2. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
 [CHANGELOG.md](../CHANGELOG.md)).

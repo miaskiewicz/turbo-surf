@@ -23,7 +23,7 @@ replacing or closing the document rejects the old continuation. The cached
 `initialProgress` status reports the actual opening phase and completed pumps;
 `post-load-hydration` records a reached load goal rather than global quiescence.
 
-## Current rendering scope (v0.8.4 candidate)
+## Current rendering scope (v0.8.7 candidate)
 
 The implemented GPU bridge is described in [GPU-BRIDGE.md](../docs/GPU-BRIDGE.md).
 `gpu-metal` and `coretext` are optional consumer features, off in default shipped
@@ -31,11 +31,10 @@ builds. MCP and NAPI install their compiled WebGL hooks; Python's feature
 forwarding alone does not install them. The native Chrome 154/155 SDK profile is
 an independent engine selection, not a GPU prerequisite or runtime GPU switch.
 
-Canonical browser-env implements CSS/Web Animations. Native geometry admits
-proven independent local boxes and isolated scroll extents, while affected
-animated targets/ancestors, descendant-dependent extents, nonzero-offset and
-other unsupported paths retain explicit rejection. This is not general animated
-layout/paint sampling. Reduced-motion media does not disable animations. The explicit
+Canonical browser-env implements CSS/Web Animations. Native geometry can use
+certified presented values and admit proven independent local boxes and isolated
+scroll extents. Unsupported effects or dependencies still produce explicit
+errors. Reduced-motion media does not disable animations. The explicit
 [animation presentation policy](../docs/ANIMATION-POLICY.md) can suppress canonical
 effect presentation per session while preserving timing, events, promises and
 ordinary JavaScript callbacks.
@@ -54,7 +53,7 @@ its existing single-document runtime scope.
 ## Historical parity evidence
 
 The Google checkpoints and cohort counts below retain their recorded source,
-engine, date and outcome. They are not current v0.8.4 release acceptance receipts.
+engine, date and outcome. Release acceptance receipts are recorded separately.
 
 The historical source-pinned validation and live outcomes are recorded in
 [FINDINGS.md](../harness/detection/FINDINGS.md) and

@@ -187,14 +187,12 @@ check or source audit does not establish cross-platform execution.
 
 ## Dependency identity and verification
 
-The v0.8.4 candidate manifests declare the Surf workspace and DOM dependencies
-at version 0.8.4. At this source snapshot, [rust/Cargo.toml](../rust/Cargo.toml)
-patches `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout` and
-`turbo-dom-raster` to `af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`.
-The native `turbo-dom-v8` 150.4.2 and matching Deno distributions use their
-checksum-pinned registry packages, without local source overrides.
-[Cargo.lock](../rust/Cargo.lock) resolves those DOM crates as 0.8.4, the V8 fork
-package as 150.4.2, and `turbo-surf-deno-core` as registry version 0.412.4.
+The v0.8.7 candidate pins `turbo-dom`, `turbo-dom-browser-env`,
+`turbo-dom-layout` and `turbo-dom-raster` to one producer revision in
+[rust/Cargo.toml](../rust/Cargo.toml). [Cargo.lock](../rust/Cargo.lock) resolves those
+crates at 0.8.7 and uses registry `turbo-dom-v8` 150.4.2 and
+`turbo-surf-deno-core` 0.412.5. Published Surf releases require the registry
+versions of the DOM crates.
 
 The manifest and lockfile of the artifact being tested are authoritative after
 any repin. Record their hashes and resolved sources with the receipt; a package

@@ -63,8 +63,9 @@ See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 
 Since 0.6.0 turbo-surf keeps no copies of shared engine code: it links the
 [turbo-dom](https://github.com/miaskiewicz/turbo-dom) crates that turbo-test and
-turbo-html2pdf use too. The Rust release graph consumes the published crates.io
-0.8.4 releases of the four DOM crates, pinned by the lockfile checksums —
+turbo-html2pdf use too. The 0.8.7 candidate pins the four DOM crates to one
+Turbo-DOM release commit. Publishing requires the matching crates.io archives
+and their lockfile checksums. The shared engine consists of:
 
 - **`turbo-dom`** — HTML parser, copy-on-write DOM, CSSOM and the one selector engine;
 - **`turbo-dom-layout`** — style cascade and layout behind live geometry
@@ -84,7 +85,8 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 ## Status
 
 Status: **v0.8.7 release candidate**.
-Version 0.8.6 uses the published turbo-dom 0.8.6 crates. See
+The 0.8.7 candidate uses the Turbo-DOM 0.8.7 development pin while the registry
+crates await publication. See
 [CHANGELOG.md](./CHANGELOG.md) for release changes and
 [PUBLISHING.md](./PUBLISHING.md) for release validation and artifact verification.
 The engine includes hardened
@@ -666,8 +668,9 @@ Compatibility depends on the APIs and layout features the application uses, not
 on whether it is called an SPA. Synthetic screenshots are representative native
 renders; they are not browser compositor captures. Animation support remains
 separate from geometry on an animated target: unaffected local reads are scoped,
-while unsupported dependent reads still fail explicitly. A session-level
-animations on/off policy is a v0.8.4 follow-up ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500)).
+while unsupported dependent reads still fail explicitly. Set
+`animations: "disabled"` on a Playwright shim context to use underlying geometry
+without sampling presented animation values.
 
 ## Python
 
@@ -743,8 +746,8 @@ To run the full CI workflow without a PR, use **Actions → CI → Run workflow*
 select the branch, or dispatch it with GitHub CLI:
 
 ```sh
-gh workflow run ci.yml --repo miaskiewicz/turbo-surf --ref release/v0.8.6
-gh run list --repo miaskiewicz/turbo-surf --workflow ci.yml --branch release/v0.8.6 --event workflow_dispatch
+gh workflow run ci.yml --repo miaskiewicz/turbo-surf --ref release/v0.8.7
+gh run list --repo miaskiewicz/turbo-surf --workflow ci.yml --branch release/v0.8.7 --event workflow_dispatch
 ```
 
 Replace the ref with your branch. It must contain the `workflow_dispatch` trigger;

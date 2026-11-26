@@ -1215,13 +1215,18 @@ class Locator {
   }
   async _liveReadSource(source, arg) {
     await this._prepareQuery();
-    const index = await this._resolveLiveIdx();
-    if (index == null) return null;
-    // Pure DOM reads must not await unrelated exposed host callbacks.
+    if (this._page._session == null) return null;
+    // Resolve and read in one actor command. A timer or render between commands
+    // can otherwise change the locator index or remove the matched element.
     const result = await this._page._readEngineAsync(`
-      try { return {value: (${encodeEvaluationValue.toString()})(
-        (${source})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
-      catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
+      try {
+        const matches = ${this._liveElementsExpression()};
+        if (${this._index == null} && matches.length > 1)
+          throw new Error('strict mode violation: locator resolved to ' + matches.length + ' elements');
+        const element = matches[0];
+        return {value: (${encodeEvaluationValue.toString()})(
+          element ? (${source})(element,${JSON.stringify(arg ?? null)}) : null)};
+      } catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
     `);
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
@@ -1983,14 +1988,9 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       ];
       const className = constructors.find(([pattern]) => pattern.test(type))?.[1] || "Event";
       const EventClass = globalThis[className];
-      const box = el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
-      if (type === "click" && box) el.checked = el.type === "radio" ? true : !el.checked;
+      // Native MouseEvent activation owns checked state, cancellation and events.
       const ev = new EventClass(type, { bubbles: true, cancelable: true, composed: true, view: globalThis, ...eventInit });
       t.dispatchEvent(ev);
-      if (type === "click" && box) {
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       globalThis.__RESULT = "OK";
     } })();`;
   }

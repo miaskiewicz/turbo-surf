@@ -226,7 +226,7 @@ test("aggregation rejects absent and malformed raw reports", (t) => {
   assert.match(result.stderr, /Invalid raw V8 report/);
 });
 
-test("real V8 merge retains all 44 files, including zero-hit unloaded sources", (t) => {
+test("real V8 merge retains the full inventory, including zero-hit unloaded sources", (t) => {
   const { directory, root } = fixture(t);
   const raw = path.join(directory, "raw");
   fs.mkdirSync(raw);
@@ -239,11 +239,14 @@ test("real V8 merge retains all 44 files, including zero-hit unloaded sources", 
   assert.notEqual(result.status, 0, "Unloaded product lines must keep the gate red");
   assert.match(result.stderr, /Unloaded product files/);
   const summary = JSON.parse(fs.readFileSync(path.join(directory, "coverage.json"), "utf8"));
-  assert.equal(summary.files.length, 44);
-  assert.equal(summary.files.filter((f) => f.coveredLineCount === 0).length, 43);
+  assert.equal(summary.files.length, scope.files.length);
+  assert.equal(
+    summary.files.filter((f) => f.coveredLineCount === 0).length,
+    scope.files.length - 1,
+  );
   const gate = JSON.parse(fs.readFileSync(path.join(directory, "gate.json"), "utf8"));
   assert.equal(gate.testsPassed, false);
-  assert.equal(gate.unloadedFiles.length, 43);
+  assert.equal(gate.unloadedFiles.length, scope.files.length - 1);
   assert.equal(gate.pass, false);
   assert.ok(gate.metrics.lines.total > gate.metrics.lines.covered);
 });

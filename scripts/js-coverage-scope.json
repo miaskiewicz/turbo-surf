@@ -17,6 +17,7 @@
     "rust/playwright-shim/attempt-worker.mjs",
     "rust/playwright-shim/bin/turbo-surf-test.mjs",
     "rust/playwright-shim/binding-drain.mjs",
+    "rust/playwright-shim/click-scroll.mjs",
     "rust/playwright-shim/config.mjs",
     "rust/playwright-shim/console-message.mjs",
     "rust/playwright-shim/context-emulation-forwarding.mjs",

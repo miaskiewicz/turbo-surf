@@ -3,6 +3,9 @@ use deno_core::v8;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
+use turbo_dom_browser_env::host_internals::{
+    collect_native_storage_if_needed, StorageCollectionOutcome,
+};
 use turbo_dom_parser::rtdom::tree::CollectionBudget;
 
 const BUDGET: CollectionBudget = CollectionBudget {
@@ -80,12 +83,12 @@ pub(crate) fn boundary(isolate: &mut v8::Isolate) {
     crate::context_ownership::sweep_collected(scope);
     crate::web_streams_backend::sweep(scope);
     crate::runtime::fetch_streams::sweep(scope);
-    match crate::browser_env::collect_native_storage(scope, BUDGET, MAX_DOCUMENTS) {
+    match collect_native_storage_if_needed(scope, BUDGET, MAX_DOCUMENTS) {
         Ok(report) => {
             let reclaimed = report
                 .documents
                 .iter()
-                .map(|(_, row)| row.reclaimed_nodes)
+                .map(|(_, outcome)| outcome.report().reclaimed_nodes)
                 .sum::<usize>();
             state
                 .collections
@@ -94,11 +97,15 @@ pub(crate) fn boundary(isolate: &mut v8::Isolate) {
                 .reclaimed
                 .set(state.reclaimed.get().saturating_add(reclaimed));
             *state.last.borrow_mut() = serde_json::json!({
-                "documents": report.documents.iter().map(|(owner, row)| serde_json::json!({
-                    "owner":owner,"reclaimed":row.reclaimed_nodes,
-                    "beforeNodes":row.before.live_nodes,"afterNodes":row.after.live_nodes,
-                    "beforePayloadBytes":row.before.payload_bytes,"afterPayloadBytes":row.after.payload_bytes
-                })).collect::<Vec<_>>()
+                "documents": report.documents.iter().map(|(owner, outcome)| {
+                    let row = outcome.report();
+                    serde_json::json!({
+                        "owner":owner,"reclaimed":row.reclaimed_nodes,
+                        "rewrote":matches!(outcome, StorageCollectionOutcome::Compacted(_)),
+                        "beforeNodes":row.before.live_nodes,"afterNodes":row.after.live_nodes,
+                        "beforePayloadBytes":row.before.payload_bytes,"afterPayloadBytes":row.after.payload_bytes
+                    })
+                }).collect::<Vec<_>>()
             });
         }
         Err(error) => {

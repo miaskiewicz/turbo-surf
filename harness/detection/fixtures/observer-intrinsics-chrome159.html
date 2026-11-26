@@ -1,0 +1,15 @@
+<!doctype html><style>#box{width:100px;height:40px;padding:3px;border:2px solid black;box-sizing:content-box}</style><div id="box"></div><script>
+const mode=new URL(location.href).searchParams.get('mode')||'baseline';
+const box=document.getElementById('box');const rows=[];const calls={prototype:0,own:0,global:0};
+const nativeStyle=getComputedStyle;const nativeGet=CSSStyleDeclaration.prototype.getPropertyValue;
+const ownStyle=nativeStyle(box);const sameStyle=nativeStyle(box)===ownStyle;
+if(mode==='prototype')CSSStyleDeclaration.prototype.getPropertyValue=function(name){calls.prototype++;return Reflect.apply(nativeGet,this,[name])};
+if(mode==='own'){
+ Object.defineProperty(ownStyle,'getPropertyValue',{configurable:true,value:function(name){calls.own++;return Reflect.apply(nativeGet,this,[name])}});
+ globalThis.getComputedStyle=function(target,...args){calls.global++;return target===box?ownStyle:Reflect.apply(nativeStyle,globalThis,[target,...args])};
+}
+let changed=false;const a=new ResizeObserver(entries=>{rows.push({observer:'a',width:entries[0].contentRect.width,border:entries[0].borderBoxSize[0].inlineSize});if(!changed){changed=true;box.style.width='140px'}});
+const b=new ResizeObserver(entries=>rows.push({observer:'b',width:entries[0].contentRect.width,border:entries[0].borderBoxSize[0].inlineSize}));
+a.observe(box);b.observe(box);
+setTimeout(()=>{a.disconnect();b.disconnect();globalThis.result={mode,calls,rows,sameStyle};globalThis.done=true},400);
+</script>

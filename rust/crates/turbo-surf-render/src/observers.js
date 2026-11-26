@@ -34,7 +34,8 @@
   const weakGet = WeakMap.prototype.get,
     weakSet = WeakMap.prototype.set;
   const hostTimeout = globalThis.setTimeout,
-    computedStyle = globalThis.getComputedStyle;
+    computedStyle = globalThis.getComputedStyle,
+    computedProperty = CSSStyleDeclaration.prototype.getPropertyValue;
   const HostMutationObserver = globalThis.MutationObserver,
     mutationObserve = HostMutationObserver.prototype.observe,
     mutationDisconnect = HostMutationObserver.prototype.disconnect;
@@ -166,9 +167,9 @@
     style
       ? ["top", "right", "bottom", "left"].map((side) =>
           px(
-            style.getPropertyValue(
+            apply(computedProperty, style, [
               property === "border" ? `border-${side}-width` : `${property}-${side}`,
-            ),
+            ]),
           ),
         )
       : [0, 0, 0, 0];
@@ -576,8 +577,8 @@
   // An ancestor clips when either overflow axis is not visible (computed "" reads as visible).
   const clips = (style) => {
     if (!style) return false;
-    const overflow = style.getPropertyValue("overflow");
-    const axis = (name) => style.getPropertyValue(name) || overflow || "visible";
+    const overflow = apply(computedProperty, style, ["overflow"]);
+    const axis = (name) => apply(computedProperty, style, [name]) || overflow || "visible";
     return axis("overflow-x") !== "visible" || axis("overflow-y") !== "visible";
   };
   // HTML "run the update intersection observations steps" for one target.

@@ -2414,6 +2414,7 @@ class Frame {
         ? await this._typeWithCanonicalSelection(script)
         : await this._sessionEval(script, {
             waitForNavigation: kind === "click" && !value?.noWaitAfter,
+            waitForBindings: kind !== "click" || !this._parentPage._routes?.length,
           });
     if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
     return result;
@@ -3767,6 +3768,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // locator failure. Drain is best-effort; a throwing binding writes to
     // console (same shape as _sessionEval → drain errors).
     if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    // A route handler can be held by the caller until this click returns.
+    if (kind === "click" && this._routes?.length) {
+      scheduleBindingDrain(this);
+      return r;
+    }
     // Drain exposed-binding calls queued by handlers that ran during this
     // interaction so a subsequent assert sees them without waiting for the next
     // evaluate — matches `_sessionEval`'s contract.

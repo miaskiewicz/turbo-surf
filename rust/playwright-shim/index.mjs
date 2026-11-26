@@ -1616,8 +1616,10 @@ class Locator {
     await this._prepareQuery();
     if (!this._canDriveLive) return false;
     try {
-      const r = await this._driveLive("isfocused");
-      return r === "true";
+      return (
+        (await this._liveRead((element) => element.getRootNode().activeElement === element)) ===
+        true
+      );
     } catch {
       return false;
     }

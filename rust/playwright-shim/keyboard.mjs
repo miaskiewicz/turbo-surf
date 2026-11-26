@@ -100,7 +100,7 @@ export function makeKeyboard(page) {
   };
   const down = (key) => dispatch("keydown", key);
   const up = (key) => dispatch("keyup", key);
-  const press = async (chord) => {
+  const press = async (chord, { delay = 0 } = {}) => {
     const parts = String(chord) === "+" ? ["+"] : String(chord).split("+");
     const key = parts.pop();
     const introduced = [];
@@ -113,6 +113,7 @@ export function makeKeyboard(page) {
     }
     try {
       await down(key);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       await up(key);
     } finally {
       for (const modifier of introduced.reverse()) await up(modifier);
@@ -122,8 +123,8 @@ export function makeKeyboard(page) {
     press,
     down,
     up,
-    async type(text) {
-      for (const character of String(text)) await press(character);
+    async type(text, options) {
+      for (const character of String(text)) await press(character, options);
     },
     async insertText(text) {
       await page._ensureLive();

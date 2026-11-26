@@ -16,6 +16,13 @@ fn runtime() -> Result<&'static Runtime, String> {
         .map_err(|error| format!("HTTP transport runtime: {error}"))
 }
 
+pub(crate) fn spawn_background(
+    future: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), String> {
+    drop(runtime()?.spawn(future));
+    Ok(())
+}
+
 struct Operation<T>(JoinHandle<T>);
 impl<T> Drop for Operation<T> {
     fn drop(&mut self) {

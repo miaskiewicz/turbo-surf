@@ -122,6 +122,18 @@ struct BackgroundState {
     detached: bool,
 }
 impl BackgroundBody {
+    fn finish(&self, error: Option<HttpError>, completion: Option<ResponseCompletionObserver>) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(completion) = completion {
+            completion(error.clone().map_or(Ok(()), Err));
+        }
+        state.done = true;
+        state.failed = error.is_some();
+        state.error = error;
+        drop(state);
+        self.ready.notify_one();
+    }
+
     fn push(&self, bytes: &[u8]) {
         const CHUNK: usize = 64 * 1024;
         let mut state = self.state.lock().unwrap();
@@ -217,7 +229,11 @@ impl ResponseBody {
             dictionary_store: None,
             background: Some(background.clone()),
         };
-        tokio::spawn(async move {
+        let failed_background = background.clone();
+        let failed_completion = completion.clone();
+        // Body completion must progress while the caller runs synchronous V8.
+        // Its owner watch still cancels the transport independently of guest pulls.
+        if let Err(error) = crate::http_transport::spawn_background(async move {
             let mut transport = self;
             let error = loop {
                 let chunk = if *owner.borrow() || *canceled.borrow() {
@@ -245,16 +261,13 @@ impl ResponseBody {
                     }
                 }
             };
-            let mut state = background.state.lock().unwrap();
-            if let Some(completion) = completion {
-                completion(error.clone().map_or(Ok(()), Err));
-            }
-            state.done = true;
-            state.failed = error.is_some();
-            state.error = error;
-            drop(state);
-            background.ready.notify_one();
-        });
+            background.finish(error, completion);
+        }) {
+            failed_background.finish(
+                Some(HttpError::new(error, ErrorCode::Network)),
+                failed_completion,
+            );
+        }
         consumer
     }
     /// Collection releases queued guest bytes while the native cache fill keeps
@@ -3374,6 +3387,110 @@ mod io_tests {
             consumed.extend(chunk);
         }
         assert_eq!(consumed, *bytes.lock().unwrap());
+    }
+
+    #[test]
+    fn host_body_completion_does_not_require_polling_the_caller_runtime() {
+        use std::io::{Read, Write};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::Duration;
+
+        for (payload, limit, cancel_owner, expected) in [
+            (b"\x00\xffok".as_slice(), 4, false, None),
+            (b"12345".as_slice(), 4, false, Some(ErrorCode::BodyTooLarge)),
+            (b"later".as_slice(), 5, true, Some(ErrorCode::Network)),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, released) = mpsc::channel();
+            let (sent, body_sent) = mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                    assert!(request.len() <= 8192);
+                }
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",payload.len()).as_bytes()).unwrap();
+                socket.flush().unwrap();
+                released.recv_timeout(Duration::from_secs(3)).unwrap();
+                let written = socket.write_all(payload).and_then(|_| socket.flush());
+                if !cancel_owner {
+                    written.unwrap();
+                }
+                sent.send(()).unwrap();
+            });
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let (owner_sender, owner) = tokio::sync::watch::channel(false);
+            let captured = Arc::new(Mutex::new(Vec::new()));
+            let chunks = captured.clone();
+            let (completed, completion) = mpsc::channel();
+            let mut body = runtime.block_on(async {
+                let response = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    fetch_stream(
+                        &format!("http://{address}/body"),
+                        FetchOptions {
+                            allow_non_html: true,
+                            max_bytes: Some(limit),
+                            ..Default::default()
+                        },
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                response.body.background_observed(
+                    owner,
+                    Arc::new(move |chunk| chunks.lock().unwrap().extend_from_slice(chunk)),
+                    Arc::new(move |result| {
+                        let _ = completed.send(result);
+                    }),
+                )
+            });
+            // The peer sends the body while this single-thread actor is not polled,
+            // as when V8 runs a synchronous layout/style callback.
+            if cancel_owner {
+                owner_sender.send(true).unwrap();
+            }
+            release.send(()).unwrap();
+            body_sent.recv_timeout(Duration::from_secs(3)).unwrap();
+            let completion = completion
+                .recv_timeout(Duration::from_secs(2))
+                .expect("transport completion must not wait for the caller runtime");
+            if let Some(expected) = expected.as_ref() {
+                assert_eq!(&completion.unwrap_err().code, expected);
+            } else {
+                completion.unwrap();
+                assert_eq!(captured.lock().unwrap().as_slice(), payload);
+            }
+            let consumed = runtime.block_on(async {
+                let mut bytes = Vec::new();
+                while let Some(chunk) = body.next_chunk().await? {
+                    bytes.extend(chunk);
+                }
+                Ok::<_, HttpError>(bytes)
+            });
+            if let Some(expected) = expected.as_ref() {
+                assert_eq!(&consumed.unwrap_err().code, expected);
+                let bytes = captured.lock().unwrap();
+                assert!(bytes.len() <= limit && payload.starts_with(&bytes));
+                if cancel_owner {
+                    assert!(bytes.is_empty());
+                }
+            } else {
+                assert_eq!(consumed.unwrap(), payload);
+            }
+            server.join().unwrap();
+        }
     }
 
     #[tokio::test]

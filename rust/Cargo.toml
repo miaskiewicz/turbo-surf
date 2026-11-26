@@ -29,7 +29,7 @@ lto = "thin"
 # eb040c84c150b30e30c2483a39b8784e44a4da93 (DOM state, History, DOMParser and positioned checkbox geometry and sibling-rank and XPath value-admission and cached own-box proof and scroll/hit ownership and connected-document checkpoint fixes).
 # Replace with registry 0.8.7 after publication, before tagging Surf.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "edf1d00f4613b311d868c4b9bb3f29bf5bd48364" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "edf1d00f4613b311d868c4b9bb3f29bf5bd48364" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "edf1d00f4613b311d868c4b9bb3f29bf5bd48364" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "edf1d00f4613b311d868c4b9bb3f29bf5bd48364" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "3c538a6ef21abfd2df49d2134c24a931e06e9d1a" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "3c538a6ef21abfd2df49d2134c24a931e06e9d1a" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "3c538a6ef21abfd2df49d2134c24a931e06e9d1a" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "3c538a6ef21abfd2df49d2134c24a931e06e9d1a" }

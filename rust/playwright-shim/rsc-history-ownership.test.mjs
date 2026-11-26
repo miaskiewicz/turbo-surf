@@ -104,3 +104,21 @@ test("legacy targets retain their existing RSC fallback", async () => {
     await context.close();
   }
 });
+
+test("native refresh collects request context and clears a transport hint together", async () => {
+  await fixture(async (page, origin) => {
+    await page.evaluate(() => true);
+    page._readEngine("return (__tsNs.rscNav = '/hint');");
+    const collect = page._collectSession.bind(page);
+    const metadata = [];
+    page._collectSession = async (id, script, mode) => {
+      if (/requestFrameSnapshot|rscNav/.test(script)) metadata.push(script);
+      return collect(id, script, mode);
+    };
+    await page._refreshFromSession(true);
+    assert.equal(metadata.length, 1);
+    assert.equal(page._readEngine("return __tsNs.rscNav;"), "");
+    assert.equal(page.url(), origin + "/start");
+    assert.ok(page._requestContextId);
+  });
+});

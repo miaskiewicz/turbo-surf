@@ -722,8 +722,10 @@ function clickHitTestReady(element, options) {
   if (!branched) return true;
   const rect = element.getBoundingClientRect();
   const position = options?.position || { x: rect.width / 2, y: rect.height / 2 };
-  element.ownerDocument.elementFromPoint(rect.left + position.x, rect.top + position.y);
-  return true;
+  const hit = element.ownerDocument.elementFromPoint(rect.left + position.x, rect.top + position.y);
+  // A null or ancestor hit can be resolved by the dispatch's scroll step.
+  // A separate covering element must stop the click before input is sent.
+  return !hit || __tsNs.tcLocatorContains(element, hit) || __tsNs.tcLocatorContains(hit, element);
 }
 
 function finiteHitTestReadiness(error, records) {
@@ -752,6 +754,14 @@ const waitingClickHitTestSource = `function(element, options) {
     if (finiteHitTestReadiness(error, records)) return undefined;
     throw error;
   }
+}`;
+
+const clickOrFillReadySource = `function(element, options) {
+  const enabled = !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true";
+  const editable = !element.readOnly;
+  const visible = (${waitingVisibilitySource})(element);
+  if (!enabled || (options.kind === "fill" && !editable) || !visible) return false;
+  return options.kind !== "click" || (${waitingClickHitTestSource})(element, options);
 }`;
 
 class Locator {
@@ -1204,6 +1214,8 @@ class Locator {
 
   // --- accessors (node-handle backed; cross to Rust) ---
   async getAttribute(name) {
+    if (this._page._live && typeof name === "string")
+      return this._liveRead((element, name) => __tsNs.tcLocatorAttribute(element, name), name);
     await this._prepareQuery();
     if (this._page._live && typeof name === "string")
       return this._liveRead((element, name) => __tsNs.tcLocatorAttribute(element, name), name);
@@ -1241,6 +1253,7 @@ class Locator {
     });
   }
   async isVisible() {
+    if (this._page._live) return !!(await this._liveRead(renderedVisibility));
     await this._prepareQuery();
     if (!this._page._live && this._node() == null) return false;
     await this._page._ensureLive();
@@ -1388,8 +1401,8 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
-    await this._prepareQuery();
     if (
+      this._page._live &&
       this._selector &&
       !this._hasComposite() &&
       !this._parent &&
@@ -1413,19 +1426,15 @@ class Locator {
     if (options.force) return;
     const deadline = Date.now() + (options.timeout ?? 30000);
     do {
-      const live = this._page._live;
-      const state = live
-        ? await this._liveRead((element) => ({
-            enabled:
-              !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
-            editable: !element.readOnly,
-          }))
-        : this._snapshot();
-      const visible = live ? await this._waitVisibility() : state?.visible;
-      if (state?.enabled && (kind !== "fill" || state.editable) && visible) {
-        // Check the read-only dispatch hit test before emitting any input event.
-        // A later dispatch failure is still propagated without retrying the action.
-        if (await this._waitActionGeometry(kind, options)) return;
+      if (this._page._live) {
+        // Resolve and check one live element in one actor command.
+        if (
+          await this._liveReadSource(clickOrFillReadySource, { kind, position: options.position })
+        )
+          return;
+      } else {
+        const state = this._snapshot();
+        if (state?.visible && state.enabled && (kind !== "fill" || state.editable)) return;
       }
       if (Date.now() >= deadline) break;
       await this._page._redrain();
@@ -1435,17 +1444,12 @@ class Locator {
       name: "TimeoutError",
     });
   }
-  async _waitActionGeometry(kind, options) {
-    if (!this._page._live || kind !== "click") return true;
-    return this._liveReadSource(waitingClickHitTestSource, { position: options.position });
-  }
   async _waitVisibility() {
     // Proof and geometry share one guest task, including effect/target identity.
     // Unknown geometry is neither visible nor hidden; the caller owns its deadline.
     return this._liveReadSource(waitingVisibilitySource);
   }
   async fill(value, options = {}) {
-    await this._prepareQuery();
     await this._waitActionable("fill", options);
     const text = String(value);
     const match = this._singleMatch();
@@ -1525,7 +1529,6 @@ class Locator {
     } while (true);
   }
   async click(opts = {}) {
-    await this._prepareQuery();
     await this._waitActionable("click", opts);
     const modifiers = opts.modifiers?.map((modifier) =>
       modifier === "ControlOrMeta"
@@ -1704,7 +1707,6 @@ class Locator {
   // dispatchEvent(type) — fire a named DOM event into the live app (e.g. a row
   // checkbox's 'click'). Static snapshot has no JS handlers, so it needs the isolate.
   async dispatchEvent(type, eventInit = {}) {
-    await this._prepareQuery();
     await this._page._ensureLive();
     if (this._page._live)
       return void (await this._driveLive("dispatch", { type: String(type), eventInit }));
@@ -3263,11 +3265,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  async _refreshRequestContext(collectScript, historyNavigation) {
+  async _refreshRequestContext(collectScript, historyNavigation, nativeHistory) {
     try {
       const href = await collectScript(
         this._session,
-        "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
+        nativeHistory
+          ? "try { globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || ''; } finally { __tsNs.rscNav = ''; }"
+          : "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
       if (!href) return;
       const current = JSON.parse(href);
@@ -3317,8 +3321,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const previousUrl = this._url;
     const historyNavigation = await this._refreshHistory(collectScript);
     this._html = native.liveSerialize(this._session);
-    await this._refreshRequestContext(collectScript, historyNavigation);
-    const rscNavigation = await this._refreshRscNavigation(collectScript, historyNavigation);
+    // Native history ignores transport hints. Clear them with the request
+    // context read instead of scheduling a second metadata command.
+    const nativeHistory = hasNativeHistory(this);
+    await this._refreshRequestContext(collectScript, historyNavigation, nativeHistory);
+    const rscNavigation =
+      !nativeHistory && (await this._refreshRscNavigation(collectScript, historyNavigation));
     try {
       this._cookies = native.liveCookies(this._session);
     } catch {
@@ -3757,9 +3765,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (kind !== "isfocused") this._actionSeq++;
     const dispatch =
       kind === "click" && !value?.noWaitAfter ? native.liveDispatchEngine : native.liveEvalEngine;
+    // A synthetic event only needs to finish dispatching here. The normal
+    // metadata refresh and binding drain below handle follow-up work.
     const r = await dispatch(
       this._session,
       interactionScript(selector, index ?? 0, kind, value, strict),
+      kind === "dispatch" ? true : undefined,
     );
     // Dispatch already waits for document commit; metadata must not wait for load.
     await this._refreshFromSession(true);

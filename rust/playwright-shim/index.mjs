@@ -764,6 +764,12 @@ const clickOrFillReadySource = `function(element, options) {
   return options.kind !== "click" || (${waitingClickHitTestSource})(element, options);
 }`;
 
+class InteractionTargetMissing extends Error {
+  constructor() {
+    super("turbo-surf: locator matched no elements");
+  }
+}
+
 class Locator {
   constructor(page, resolve, opts = {}) {
     this._page = page;
@@ -1417,7 +1423,7 @@ class Locator {
         this._index == null,
       );
     const index = await this._resolveLiveIdx();
-    if (index == null) throw new Error("turbo-surf: locator matched no elements");
+    if (index == null) throw new InteractionTargetMissing();
     return this._page._sessionDispatch("*", index, kind, value);
   }
   async _waitActionable(kind, options = {}) {
@@ -1528,7 +1534,24 @@ class Locator {
       }
     } while (true);
   }
+  async _dispatchFirstClick(options, deadline) {
+    while (true) {
+      try {
+        return await this._driveLive("click", { ...options, clickCount: 1 });
+      } catch (error) {
+        if (!(error instanceof InteractionTargetMissing) || options.force || Date.now() >= deadline)
+          throw error;
+      }
+      // A render can detach the target between the readiness read and dispatch.
+      // Missing-target results are emitted before any pointer event is delivered.
+      await this._waitActionable("click", {
+        ...options,
+        timeout: Math.max(0, deadline - Date.now()),
+      });
+    }
+  }
   async click(opts = {}) {
+    const deadline = Date.now() + (opts.timeout ?? 30000);
     await this._waitActionable("click", opts);
     const modifiers = opts.modifiers?.map((modifier) =>
       modifier === "ControlOrMeta"
@@ -1542,7 +1565,10 @@ class Locator {
       const urlBefore = this._page._url;
       let r;
       for (let count = 1; count <= (opts.clickCount ?? 1); count++)
-        r = await this._driveLive("click", { ...opts, clickCount: count });
+        r =
+          count === 1
+            ? await this._dispatchFirstClick(opts, deadline)
+            : await this._driveLive("click", { ...opts, clickCount: count });
       if (opts.button && opts.button !== "left") return;
       // A JS handler that navigated changed the URL (SPA router / form POST + redirect).
       // If the URL is unchanged AND the app didn't preventDefault, the click hit a plain
@@ -3788,7 +3814,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // rejection that happens to be in the queue can't shadow the original
     // locator failure. Drain is best-effort; a throwing binding writes to
     // console (same shape as _sessionEval → drain errors).
-    if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    if (r === "NO_MATCH") throw new InteractionTargetMissing();
     // A route handler can be held by the caller until this click returns.
     if (kind === "click" && this._routes?.length) {
       scheduleBindingDrain(this);

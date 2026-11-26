@@ -39,7 +39,7 @@ fn supported_navigation_scheme(url: &ModuleSpecifier) -> bool {
         || (url.scheme() == "about" && url.as_str() == "about:blank")
 }
 
-fn navigate_fragment<'s>(
+pub(super) fn navigate_fragment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Context>,
     url: &ModuleSpecifier,

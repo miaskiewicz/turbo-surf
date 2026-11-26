@@ -89,8 +89,10 @@ fn open<'s>(
         return None;
     }
     let _reservation = auxiliary_policy::reserve(scope, request)?;
-    let snapshot =
+    let mut snapshot =
         auxiliary_navigation::SourceSnapshot::capture(scope, source, request.target_id).ok()?;
+    snapshot.self_hyperlink =
+        selected == Some(source) && matches!(request.source, binding::OpenSource::Hyperlink);
     let target = if let Some(selected) = selected {
         selected
     } else {

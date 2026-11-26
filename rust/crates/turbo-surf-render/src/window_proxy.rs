@@ -11,6 +11,14 @@ pub(super) fn navigation_base<'s>(
     location::navigation_base(scope, source)
 }
 
+pub(super) fn navigate_hyperlink_fragment<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    target: v8::Local<'s, v8::Context>,
+    url: &ModuleSpecifier,
+) -> bool {
+    location::navigate_fragment(scope, target, url, false, false, false)
+}
+
 struct Proxy(v8::Weak<v8::Object>);
 struct Origin(v8::Weak<v8::Value>);
 struct ExceptionConstructor(v8::Weak<v8::Function>);

@@ -1110,12 +1110,7 @@ impl PageSession {
         }
     }
 
-    async fn service_auxiliary_navigation_active(
-        &mut self,
-        owner: Option<u64>,
-        waiter: Option<u64>,
-        execution: &PollExecutionBudget,
-    ) -> Result<(), String> {
+    fn start_queued_auxiliary_navigations(&mut self, owner: Option<u64>) -> Result<(), String> {
         loop {
             let navigation = {
                 let shared = self.rt.op_state();
@@ -1145,6 +1140,16 @@ impl PageSession {
             });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
         }
+        Ok(())
+    }
+
+    async fn service_auxiliary_navigation_active(
+        &mut self,
+        owner: Option<u64>,
+        waiter: Option<u64>,
+        execution: &PollExecutionBudget,
+    ) -> Result<(), String> {
+        self.start_queued_auxiliary_navigations(owner)?;
         let init = {
             let shared = self.rt.op_state();
             let mut shared = shared.borrow_mut();

@@ -62,7 +62,7 @@ class ShardTests(unittest.TestCase):
 
 
 class ChunkExecutionTests(unittest.TestCase):
-    def run_slice(self, statuses, missing_report=None, slice_index=0):
+    def run_slice(self, statuses, missing_report=None, slice_index=0, clean_status=0):
         with tempfile.TemporaryDirectory() as temporary, chdir(temporary), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             tests = Path("crates/c/tests")
             tests.mkdir(parents=True)
@@ -73,9 +73,12 @@ class ChunkExecutionTests(unittest.TestCase):
             profraws = Path(CONFIG["target-dir"], "tarpaulin", "profraws")
             profraws.mkdir(parents=True)
             (profraws / "stale.profraw").write_text("prior run")
-            calls = []
+            calls, clean_calls = [], []
 
             def run(args):
+                if args[:2] == ["cargo", "clean"]:
+                    clean_calls.append((len(calls), args))
+                    return clean_status
                 index = len(calls)
                 calls.append(args)
                 self.assertFalse(path.exists(), "Each chunk must produce its own report")
@@ -89,9 +92,10 @@ class ChunkExecutionTests(unittest.TestCase):
             with mock.patch.object(SHARD.subprocess, "call", side_effect=run):
                 status = SHARD.run_chunked(CONFIG, "render", "c", 4, slice_index, 2)
             self.assertFalse(profraws.exists(), "Final raw counters must also be removed")
+            self.assertEqual(clean_calls, [(1, ["cargo", "clean", "--target-dir", "target/cov", "-p", "c"])])
             return status, json.loads(path.read_text()), calls
 
-    def test_each_runner_cleans_once_then_reuses_the_same_instrumented_build(self):
+    def test_each_runner_reclaims_completed_crate_artifacts_and_reuses_dependencies(self):
         for slice_index in (0, 1):
             with self.subTest(slice_index=slice_index):
                 status, merged, calls = self.run_slice([0, 0], slice_index=slice_index)
@@ -102,6 +106,12 @@ class ChunkExecutionTests(unittest.TestCase):
                 self.assertEqual(calls[1], expected[1] + ["--skip-clean"])
                 self.assertEqual(status, 0)
                 self.assertEqual(merged["covered"], 2)
+
+    def test_clean_failure_keeps_completed_reports_and_stops_before_next_chunk(self):
+        status, merged, calls = self.run_slice([0, 0], clean_status=5)
+        self.assertEqual(status, 5)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(merged["covered"], 1)
 
     def test_sliced_failure_still_exports_merged_reports_and_fails(self):
         status, merged, calls = self.run_slice([0, 3])

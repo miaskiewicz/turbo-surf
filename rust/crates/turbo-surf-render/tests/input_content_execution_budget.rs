@@ -8,11 +8,11 @@ use turbo_surf_render::{PageSession, PageSessionOptions, WindowTimerMode};
 
 const INTERNAL: u64 = 200;
 const HARD: &str = "Execution interrupted by the session execution budget";
-fn callback(infinite: bool) -> String {
+fn callback(infinite: bool, finite_ms: u64) -> String {
     let work = if infinite {
-        "while(true){}"
+        "while(true){}".to_owned()
     } else {
-        "const until=performance.now()+100;while(performance.now()<until){}"
+        format!("const until=performance.now()+{finite_ms};while(performance.now()<until){{}}")
     };
     format!("globalThis.turn={{entered:0,active:false,exited:0}};globalThis.runTurn=()=>{{turn.entered++;turn.active=true;try{{{work}}}finally{{turn.active=false;turn.exited++}}}};")
 }
@@ -77,12 +77,18 @@ async fn input(infinite: bool) {
         target,
         &format!(
             "{}document.querySelector('#q').onclick=runTurn;return true;",
-            callback(infinite)
+            callback(infinite, 25)
         ),
     )
     .unwrap();
     page.set_execution_budget_for_testing(INTERNAL);
-    let result = page.input(&json!([{"wait":140},{"click":"#q"}])).await;
+    let steps = if infinite {
+        json!([{"click":"#q"}])
+    } else {
+        // Let the finite turn finish before expiring in a separate pending wait.
+        json!([{"click":"#q"},{"wait":400}])
+    };
+    let result = page.input(&steps).await;
     check(&mut page, target, result, infinite);
     page.close();
 }
@@ -104,7 +110,7 @@ impl ScriptServer {
         let seen = requested.clone();
         let release = Arc::new(tokio::sync::Notify::new());
         let released = release.clone();
-        let body = format!("{}runTurn();", callback(infinite));
+        let body = format!("{}runTurn();", callback(infinite, 100));
         let task = tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 let body = body.clone();
@@ -175,7 +181,7 @@ async fn content_runaway(targeted: bool, caller: Option<u64>, internal: u64) {
     // and runner speed cannot decide whether it outlives the the applicable deadline.
     let html = format!(
         "<!doctype html><p>Replacement</p><script>{}runTurn();</script>",
-        callback(true)
+        callback(true, 0)
     );
     let result = if targeted {
         page.set_target_content(target, &html, "load", caller).await

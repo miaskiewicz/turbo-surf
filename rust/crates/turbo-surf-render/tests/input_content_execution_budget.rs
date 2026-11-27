@@ -152,11 +152,7 @@ async fn content(targeted: bool, infinite: bool, timeout: Option<u64>) {
     let server = ScriptServer::start(infinite).await;
     let mut page = open(&server.origin).await;
     let target = page.auxiliary_root_id().unwrap();
-    page.set_execution_budget_for_testing(if timeout == Some(INTERNAL) {
-        5_000
-    } else {
-        INTERNAL
-    });
+    page.set_execution_budget_for_testing(INTERNAL);
     let html = "<!doctype html><p>Replacement</p><script src='/gate.js'></script>";
     let result = if targeted {
         page.set_target_content(target, html, "load", timeout).await
@@ -167,17 +163,33 @@ async fn content(targeted: bool, infinite: bool, timeout: Option<u64>) {
         server.requested.load(Ordering::Acquire),
         "actual script request must be admitted: {result:?}"
     );
-    if timeout == Some(INTERNAL) {
-        let state = turn(&mut page, target);
-        assert_eq!(
-            state["entered"], 1,
-            "caller-deadline precondition: {state}; {result:?}"
-        );
-        assert_eq!(state["exited"], 0);
-        assert_eq!(result.unwrap_err(), "setContent timeout after 200ms");
+    check(&mut page, target, result.map(|_| ()), infinite);
+    page.close();
+}
+
+async fn content_caller_deadline(targeted: bool) {
+    let mut page = open("http://explicit-content-budget.test/").await;
+    let target = page.auxiliary_root_id().unwrap();
+    page.set_execution_budget_for_testing(5_000);
+    // Run an inline callback with no natural completion so network delivery
+    // and runner speed cannot decide whether it outlives the caller's deadline.
+    let html = format!(
+        "<!doctype html><p>Replacement</p><script>{}runTurn();</script>",
+        callback(true)
+    );
+    let result = if targeted {
+        page.set_target_content(target, &html, "load", Some(INTERNAL))
+            .await
     } else {
-        check(&mut page, target, result.map(|_| ()), infinite);
-    }
+        page.set_content(&html, "load", Some(INTERNAL)).await
+    };
+    let state = turn(&mut page, target);
+    assert_eq!(
+        state["entered"], 1,
+        "caller-deadline precondition: {state}; {result:?}"
+    );
+    assert_eq!(state["exited"], 0);
+    assert_eq!(result.unwrap_err(), "setContent timeout after 200ms");
     page.close();
 }
 // Request admission does not imply that an external script has arrived. Hold
@@ -248,11 +260,11 @@ async fn target_content_infinite_callback_is_hard_interrupted() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_explicit_caller_deadline_remains_hard() {
-    content(false, false, Some(INTERNAL)).await;
+    content_caller_deadline(false).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_explicit_caller_deadline_remains_hard() {
-    content(true, false, Some(INTERNAL)).await;
+    content_caller_deadline(true).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -98,7 +98,10 @@ test(
           release();
         }
         await clicking;
-        assert.equal(await page.locator("#result").textContent(), "actual-route-reply");
+        // The click can finish before the released route body reaches the page.
+        await shim
+          .expect(page.locator("#result"))
+          .toHaveText("actual-route-reply", { timeout: 3000 });
       },
     );
   },

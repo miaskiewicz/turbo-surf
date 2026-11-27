@@ -77,6 +77,8 @@ class ChunkExecutionTests(unittest.TestCase):
 
             def run(args):
                 if args[:2] == ["cargo", "clean"]:
+                    tag = Path(CONFIG["target-dir"], "CACHEDIR.TAG").read_text()
+                    self.assertTrue(tag.startswith("Signature: 8a477f597d28d172789f06886806bc55\n"))
                     clean_calls.append((len(calls), args))
                     return clean_status
                 index = len(calls)

@@ -190,7 +190,7 @@ impl Drop for Fixture {
 
 async fn contract(continuation: bool, hard: bool) {
     let document = if continuation {
-        format!("<!doctype html><body><script type=module>{}const response=fetch('/gate');await hostWait();await response.then(r=>r.text());runTurn();</script>", callback(hard))
+        format!("<!doctype html><body><script type=module>{}const host=hostWait();const response=fetch('/gate');await host;await response.then(r=>r.text());runTurn();</script>", callback(hard))
     } else {
         html(hard, false)
     };

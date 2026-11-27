@@ -28,12 +28,15 @@ fn assert_deferred_metadata_bound(page: &mut PageSession, counts: PruneMeasureme
 }
 
 async fn workload(size: usize, fanout: bool) -> PruneMeasurements {
+    // The scaling contract is stated in observed work counts. Give the
+    // instrumented 32K-node run room to finish and report those counts.
+    const WORKLOAD_BUDGET_MS: u64 = 20_000;
     let mut page = PageSession::open(
         "<body><h1>healthy</h1>",
         "https://prune-scaling.test/",
         "",
         "",
-        5000,
+        WORKLOAD_BUDGET_MS,
     )
     .await
     .unwrap();

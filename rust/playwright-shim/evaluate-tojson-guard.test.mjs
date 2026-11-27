@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import {
+  decodeEvaluationValue,
+  encodeEvaluationError,
+  encodeEvaluationValue,
+  safeStringifyEnvelope,
+  safeStringifyTuple,
+} from "./evaluation-codec.mjs";
 
 let shim;
 try {
@@ -101,4 +108,34 @@ test("driver evaluation transport survives Array.prototype.toJSON = () => ({}) (
   } finally {
     await browser.close();
   }
+});
+
+test("evaluation tuples preserve their wire types and exact UTF-16", () => {
+  const text = '"\\\b\t\n\f\r\u0001😀\ud800x\udc00';
+  const input = {
+    payload: [text, null, true, false, 42, -0, Infinity, -Infinity, NaN, 123n, undefined],
+    date: new Date("2026-01-01T00:00:00Z"),
+    expression: /x/gi,
+  };
+  input.self = input;
+  const tagged = encodeEvaluationValue(input);
+  const wire = safeStringifyEnvelope("value", tagged);
+  assert.equal(wire, JSON.stringify({ value: tagged }));
+  const result = decodeEvaluationValue(JSON.parse(wire).value);
+  assert.equal(result.self, result);
+  assert.deepEqual(result.payload, input.payload);
+  assert.deepEqual(result.date, input.date);
+  assert.deepEqual(result.expression, input.expression);
+  assert.equal(safeStringifyTuple(Infinity), "null");
+  assert.throws(() => safeStringifyTuple({}), TypeError);
+});
+
+test("evaluation error envelopes retain escaped messages and optional stacks", () => {
+  const error = new RangeError('line\n"two"');
+  const tagged = encodeEvaluationError(error);
+  assert.deepEqual(JSON.parse(safeStringifyEnvelope("error", tagged)), { error: tagged });
+  assert.deepEqual(JSON.parse(safeStringifyEnvelope("error", encodeEvaluationError("oops"))), {
+    error: { name: "Error", message: "oops" },
+  });
+  assert.throws(() => safeStringifyEnvelope("result", tagged), TypeError);
 });

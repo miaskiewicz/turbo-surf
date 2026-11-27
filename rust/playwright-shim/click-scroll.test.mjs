@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { scrollClickTarget } from "./click-scroll.mjs";
 let shim;
 try {
   shim = await import("./index.mjs");
@@ -268,4 +269,78 @@ test("root and BODY query containment retain BODY's own click scrollport", async
       );
     }
   }
+});
+
+function clippingFixture() {
+  const rect = (left, top, right, bottom) => ({ left, top, right, bottom });
+  const document = {
+    defaultView: { innerWidth: 200, innerHeight: 180, getComputedStyle: (node) => node.style },
+  };
+  const node = (localName, parent, style, box) => ({
+    ownerDocument: document,
+    namespaceURI: "http://www.w3.org/1999/xhtml",
+    localName,
+    parent,
+    style: { overflowX: "visible", overflowY: "visible", contain: "", ...style },
+    getBoundingClientRect: () => box,
+    clientTop: 2,
+    clientLeft: 3,
+    clientWidth: 100,
+    clientHeight: 80,
+    isConnected: true,
+  });
+  const root = node("html", null);
+  document.documentElement = root;
+  const body = node(
+    "body",
+    root,
+    { overflowX: "hidden", overflowY: "hidden" },
+    rect(0, 0, 120, 95),
+  );
+  document.body = body;
+  const viewport = node(
+    "section",
+    body,
+    { overflowX: "auto", overflowY: "clip" },
+    rect(10, 20, 130, 120),
+  );
+  const initial = rect(140, 130, 160, 145);
+  const moved = rect(30, 40, 50, 55);
+  const target = node("button", viewport, {}, initial);
+  return { root, body, viewport, target, initial, moved, rect };
+}
+
+test("click clipping distinguishes viewport propagation, fixed positioning and containing blocks", (t) => {
+  const { body, viewport, target, initial, moved, rect } = clippingFixture();
+  let calls = 0;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "__tsNs");
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, "__tsNs", descriptor);
+    else delete globalThis.__tsNs;
+  });
+  globalThis.__tsNs = {
+    tcLocatorParent: (node) => node.parent,
+    shimNativeClickScroll: (element) => {
+      assert.equal(element, target);
+      calls++;
+      target.getBoundingClientRect = () => moved;
+    },
+  };
+
+  target.style.position = "fixed";
+  assert.deepEqual(scrollClickTarget(target), { rect: initial, clip: rect(0, 0, 200, 180) });
+  assert.equal(calls, 0);
+
+  viewport.style.transform = "translateX(1px)";
+  assert.deepEqual(scrollClickTarget(target), { rect: moved, clip: rect(13, 22, 113, 102) });
+  assert.equal(calls, 1);
+
+  body.style.contain = "paint";
+  assert.deepEqual(scrollClickTarget(target), { rect: moved, clip: rect(13, 22, 103, 82) });
+  assert.equal(calls, 1);
+
+  target.getBoundingClientRect = () => initial;
+  target.isConnected = false;
+  assert.throws(() => scrollClickTarget(target), /detached during scrolling/);
+  assert.equal(calls, 2);
 });

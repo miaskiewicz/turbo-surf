@@ -148,40 +148,39 @@ impl Drop for ScriptServer {
         self.task.abort();
     }
 }
-async fn content(targeted: bool, infinite: bool, timeout: Option<u64>) {
-    let server = ScriptServer::start(infinite).await;
+async fn content_finite(targeted: bool) {
+    let server = ScriptServer::start(false).await;
     let mut page = open(&server.origin).await;
     let target = page.auxiliary_root_id().unwrap();
     page.set_execution_budget_for_testing(INTERNAL);
     let html = "<!doctype html><p>Replacement</p><script src='/gate.js'></script>";
     let result = if targeted {
-        page.set_target_content(target, html, "load", timeout).await
+        page.set_target_content(target, html, "load", None).await
     } else {
-        page.set_content(html, "load", timeout).await
+        page.set_content(html, "load", None).await
     };
     assert!(
         server.requested.load(Ordering::Acquire),
         "actual script request must be admitted: {result:?}"
     );
-    check(&mut page, target, result.map(|_| ()), infinite);
+    check(&mut page, target, result.map(|_| ()), false);
     page.close();
 }
 
-async fn content_caller_deadline(targeted: bool) {
-    let mut page = open("http://explicit-content-budget.test/").await;
+async fn content_runaway(targeted: bool, caller: Option<u64>, internal: u64) {
+    let mut page = open("http://runaway-content-budget.test/").await;
     let target = page.auxiliary_root_id().unwrap();
-    page.set_execution_budget_for_testing(5_000);
+    page.set_execution_budget_for_testing(internal);
     // Run an inline callback with no natural completion so network delivery
-    // and runner speed cannot decide whether it outlives the caller's deadline.
+    // and runner speed cannot decide whether it outlives the the applicable deadline.
     let html = format!(
         "<!doctype html><p>Replacement</p><script>{}runTurn();</script>",
         callback(true)
     );
     let result = if targeted {
-        page.set_target_content(target, &html, "load", Some(INTERNAL))
-            .await
+        page.set_target_content(target, &html, "load", caller).await
     } else {
-        page.set_content(&html, "load", Some(INTERNAL)).await
+        page.set_content(&html, "load", caller).await
     };
     let state = turn(&mut page, target);
     assert_eq!(
@@ -189,7 +188,12 @@ async fn content_caller_deadline(targeted: bool) {
         "caller-deadline precondition: {state}; {result:?}"
     );
     assert_eq!(state["exited"], 0);
-    assert_eq!(result.unwrap_err(), "setContent timeout after 200ms");
+    let expected = if caller == Some(INTERNAL) {
+        "setContent timeout after 200ms"
+    } else {
+        HARD
+    };
+    assert_eq!(result.unwrap_err(), expected);
     page.close();
 }
 // Request admission does not imply that an external script has arrived. Hold
@@ -244,27 +248,27 @@ async fn input_infinite_callback_is_hard_interrupted() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_without_caller_deadline_preserves_a_finite_callback_tail() {
-    content(false, false, None).await;
+    content_finite(false).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_without_caller_deadline_preserves_a_finite_callback_tail() {
-    content(true, false, None).await;
+    content_finite(true).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_infinite_callback_is_hard_interrupted() {
-    content(false, true, None).await;
+    content_runaway(false, None, INTERNAL).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_infinite_callback_is_hard_interrupted() {
-    content(true, true, None).await;
+    content_runaway(true, None, INTERNAL).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_explicit_caller_deadline_remains_hard() {
-    content_caller_deadline(false).await;
+    content_runaway(false, Some(INTERNAL), 5_000).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_explicit_caller_deadline_remains_hard() {
-    content_caller_deadline(true).await;
+    content_runaway(true, Some(INTERNAL), 5_000).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -277,9 +281,9 @@ async fn target_content_reports_internal_expiry_before_a_later_caller_deadline()
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_internal_hard_stop_is_not_relabelled_as_a_later_caller_timeout() {
-    content(false, true, Some(1000)).await;
+    content_runaway(false, Some(1000), INTERNAL).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_internal_hard_stop_is_not_relabelled_as_a_later_caller_timeout() {
-    content(true, true, Some(1000)).await;
+    content_runaway(true, Some(1000), INTERNAL).await;
 }

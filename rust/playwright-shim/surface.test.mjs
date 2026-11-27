@@ -3476,40 +3476,57 @@ test("Live checkbox actions execute one default and retain requested state (#351
 });
 
 test("navigation deadlines also cancel slow hydration (#427)", async () => {
+  const heldScripts = new Set();
+  let stallHydration = true;
   const server = createServer((req, res) => {
+    res.setHeader("cache-control", "no-store");
+    if (req.url === "/ready") return res.end("<body>Ready</body>");
     if (req.url === "/slow.js") {
-      setTimeout(() => {
-        res.setHeader("content-type", "application/javascript");
+      res.setHeader("content-type", "application/javascript");
+      if (stallHydration) {
+        heldScripts.add(res);
+        res.on("close", () => heldScripts.delete(res));
+        res.flushHeaders();
+      } else {
         res.end("document.body.dataset.loaded='yes'");
-      }, 180);
+      }
       return;
     }
     res.end('<body><script src="/slow.js"></script></body>');
   });
   const base = await listen(server);
   const page = newPage();
+  const recover = async (target) => {
+    // Retire held fixture responses before serving the same URL normally.
+    stallHydration = false;
+    for (const response of heldScripts) response.destroy();
+    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
+    assert.equal(page._targetId, target);
+    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+  };
   try {
+    await page.goto(`${base}/ready`, { timeout: 0, waitUntil: "domcontentloaded" });
+    assert.equal(await page.evaluate(() => document.body.textContent), "Ready");
+    const target = page._targetId;
+    assert.equal(typeof target, "string");
     await assert.rejects(
       page.goto(base, { timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
     assert.equal(page.isClosed(), false);
-    const target = page._targetId;
-    assert.equal(typeof target, "string");
-    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
     assert.equal(page._targetId, target);
-    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+    await recover(target);
+    stallHydration = true;
     await assert.rejects(
       page.reload({ timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
     assert.equal(page.isClosed(), false);
     assert.equal(page._targetId, target);
-    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
-    assert.equal(page._targetId, target);
-    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+    await recover(target);
   } finally {
     await page.close();
+    server.closeAllConnections();
     await new Promise((done) => server.close(done));
   }
 });

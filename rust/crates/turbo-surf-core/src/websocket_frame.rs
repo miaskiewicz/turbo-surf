@@ -441,6 +441,26 @@ mod tests {
     }
 
     #[test]
+    fn deflate_grows_output_for_incompressible_messages() {
+        let mut state = 0x6d2b79f5_u32;
+        let original: Vec<_> = (0..2048)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        let params = DeflateParams::default();
+        let compressed = Deflater::new(params).unwrap().deflate(&original);
+        assert!(compressed.len() > original.len() / 2 + 64);
+        assert_eq!(
+            Assembler::new(Some(params)).accept(raw_frame([0xc2, 0], false, compressed)),
+            Ok(Some(Inbound::Binary(original)))
+        );
+    }
+
+    #[test]
     fn deflate_round_trips_with_and_without_context_takeover() {
         for reset in [false, true] {
             let params = DeflateParams {

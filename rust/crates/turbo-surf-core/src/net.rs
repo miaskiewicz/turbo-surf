@@ -3355,9 +3355,10 @@ mod io_tests {
     #[tokio::test]
     async fn host_body_observation_completes_without_guest_pulls_or_cache_admission() {
         let port = spawn().await;
-        let response = fetch_stream(&url(port, "/"), FetchOptions::default())
+        let mut response = fetch_stream(&url(port, "/"), FetchOptions::default())
             .await
             .unwrap();
+        assert!(!response.body.detach_observed_consumer());
         let (_owner, receiver) = tokio::sync::watch::channel(false);
         let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = bytes.clone();
@@ -4531,7 +4532,9 @@ mod http_auth_tests {
                 }
                 let request = String::from_utf8_lossy(&bytes).to_lowercase();
                 requests.lock().unwrap().push(request.clone());
-                let response = if request.contains("authorization: basic ywxpy2u6c2vjcmv0") {
+                let response = if request.starts_with("get /bearer ") {
+                    "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer realm=probe\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nNO"
+                } else if request.contains("authorization: basic ywxpy2u6c2vjcmv0") {
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
                 } else {
                     "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=probe\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nNO"
@@ -4608,6 +4611,48 @@ mod http_auth_tests {
             401
         );
         assert_eq!(seen.lock().unwrap().len(), 1);
+        seen.lock().unwrap().clear();
+        let bearer = fetch_html(
+            &format!("{origin}/bearer"),
+            FetchOptions {
+                http_credentials: Some(&credentials),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(bearer.status, 401);
+        {
+            let requests = seen.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(!requests[0].contains("authorization:"));
+        }
+        seen.lock().unwrap().clear();
+
+        // Test the retry policy after transport admission. The upstream HTTP/2
+        // requirement is a separate contract from whether a consumed body can replay.
+        let mut options = FetchOptions {
+            http_credentials: Some(&credentials),
+            ..Default::default()
+        };
+        let hop = Hop {
+            url: origin,
+            method: "POST".into(),
+            body: None,
+            body_bytes: None,
+        };
+        let client = build_follow_client(&options, false).unwrap();
+        let Err(error) = request_with_auth(&mut options, &hop, &client, true).await else {
+            panic!("streaming requests must reject an authentication replay");
+        };
+        assert_eq!(
+            error.message,
+            "Cannot replay streaming body for HTTP authentication"
+        );
+        assert_eq!(error.code, ErrorCode::Network);
+        let requests = seen.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].contains("authorization:"));
         server.abort();
     }
 }

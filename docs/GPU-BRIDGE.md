@@ -1,10 +1,9 @@
 # GPU bridge and render hooks
 
-This describes the v0.8.4 candidate's source interfaces. Its current DOM source
-pin is `af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`; use the manifest and lockfile
-of the tested artifact for exact dependency identity (see
-[build features](BUILD-FEATURES.md#dependency-identity-and-verification)). Build
-features, installed callbacks and successful hardware execution are separate checks.
+Use the manifest and lockfile of the tested artifact for exact dependency identity
+(see [build features](BUILD-FEATURES.md#dependency-identity-and-verification)).
+Build features, installed callbacks and successful hardware execution are
+separate checks.
 
 ## Features and entry points
 

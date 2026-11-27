@@ -21,6 +21,273 @@ try {
 }
 const { BrowserContext, chromium, devices, expect, newPage, request, test: pw } = shim;
 
+async function clickTargetFixture(run) {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><style>
+      #field { position:relative; width:200px; height:56px; }
+      #label { position:absolute; top:0; left:0; pointer-events:none; }
+      #control { width:200px; height:56px; }
+      #pair { display:flex; width:200px; height:40px; }
+      #pair button { width:100px; height:40px; padding:0; border:0; }
+      </style><div id="field"><div id="label">Pay schedule</div>
+      <div id="control" role="combobox" tabindex="0">Choose</div></div>
+      <div id="pair"><button id="left">Left</button><button id="right">Right</button></div>
+      <script>
+      document.querySelector('#control').addEventListener('mousedown', () => {
+        const option = document.createElement('div');
+        option.setAttribute('role', 'option'); option.textContent = 'Monthly';
+        document.body.append(option);
+      });
+      document.querySelector('#pair').addEventListener('click', event => {
+        document.body.dataset.clicked = event.target.id;
+      });
+      </script>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base);
+    await run(page);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("locator click hits a sibling combobox beneath a pointer-transparent label", async () => {
+  await clickTargetFixture(async (page) => {
+    await page.locator("#field").click();
+    assert.equal(await page.getByRole("option").count(), 1);
+    assert.equal(await page.getByRole("option").textContent(), "Monthly");
+  });
+});
+
+test("locator click position chooses the actual child under that point", async () => {
+  await clickTargetFixture(async (page) => {
+    await page.locator("#pair").click({ position: { x: 150, y: 20 } });
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "right");
+  });
+});
+
+async function activeSiblingAnimationFixture(run) {
+  await clickTargetFixture(async (page) => {
+    await page.evaluate(() => {
+      const style = document.createElement("style");
+      style.textContent = `@keyframes fadeInUp {
+        from { opacity:0; transform:translateY(8px) }
+        to { opacity:1; transform:translateY(0) }
+      }
+      #message { position:absolute; left:500px; top:300px; width:50px; height:50px }
+      #nested { width:120px; height:40px }`;
+      document.head.append(style);
+      const message = document.createElement("div");
+      message.id = "message";
+      message.textContent = "Unrelated";
+      document.body.append(message);
+      const nested = document.createElement("button");
+      nested.id = "nested";
+      nested.innerHTML = "<span><b>Nested</b></span>";
+      nested.addEventListener("click", () => {
+        document.body.dataset.clicked = "nested";
+      });
+      document.body.append(nested);
+      message.style.animation = "fadeInUp 100s linear";
+    });
+    await run(page);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        document
+          .getElementById("message")
+          .getAnimations()
+          .map((a) => a.playState),
+      ),
+      ["running"],
+    );
+  });
+}
+
+test("leaf locator clicks do not require unrelated animated sibling geometry", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await page.locator("#left").click();
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "left");
+  });
+});
+
+test("single descendant-chain clicks do not require unrelated animated sibling geometry", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await page.locator("#nested").click();
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "nested");
+  });
+});
+
+test("ambiguous locator clicks retain unsupported global hit-test guards", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await assert.rejects(page.locator("#field").click(), /animation resource.*fadeInUp/);
+    assert.equal(await page.getByRole("option").count(), 0);
+  });
+});
+
+test("explicit click positions retain unsupported global hit-test guards", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await assert.rejects(
+      page.locator("#left").click({ position: { x: 5, y: 5 } }),
+      /animation resource.*fadeInUp/,
+    );
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked ?? null), null);
+  });
+});
+
+async function transparentRippleFixture(override, run) {
+  await clickTargetFixture(async (page) => {
+    await page.evaluate((override) => {
+      const button = document.createElement("button");
+      button.id = "ripple-button";
+      button.style.cssText = "position:relative;width:200px;height:60px";
+      button.innerHTML = "End<span id='ripple'><span id='ripple-leaf'>Ripple</span></span>";
+      document.body.append(button);
+      const ripple = document.getElementById("ripple");
+      const leaf = document.getElementById("ripple-leaf");
+      ripple.style.cssText = "position:absolute;inset:0;pointer-events:none";
+      leaf.style.cssText = "position:absolute;inset:0";
+      if (override) leaf.style.pointerEvents = "auto";
+      globalThis.rippleClicks = 0;
+      globalThis.rippleEvents = [];
+      for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+        button.addEventListener(type, (event) => {
+          rippleEvents.push([type, event.target.id, event.target.isConnected]);
+          if (type === "pointerdown" && !override) ripple.remove();
+          if (type === "click") rippleClicks++;
+        });
+      }
+    }, override);
+    await run(page);
+  });
+}
+
+test("a removed pointer-transparent ripple does not swallow its button click", async () => {
+  await transparentRippleFixture(false, async (page) => {
+    await page.locator("#ripple-button").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-button", true]),
+    );
+    assert.equal(await page.locator("#ripple").count(), 0);
+  });
+});
+
+test("a descendant pointer-events auto override remains the real click recipient", async () => {
+  await transparentRippleFixture(true, async (page) => {
+    await page.locator("#ripple-button").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-leaf", true]),
+    );
+  });
+});
+
+test("transparent descendants retain an eligible inner control rather than the locator root", async () => {
+  await transparentRippleFixture(false, async (page) => {
+    await page.evaluate(() => {
+      const wrapper = document.createElement("div");
+      wrapper.id = "ripple-wrapper";
+      wrapper.style.cssText = "width:200px;height:60px";
+      const button = document.getElementById("ripple-button");
+      button.replaceWith(wrapper);
+      wrapper.append(button);
+    });
+    await page.locator("#ripple-wrapper").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-button", true]),
+    );
+  });
+});
+
+async function checkedStateFixture(run) {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><body>
+      <button id="radio" role="radio" aria-checked="false">Dated history</button>
+      <button id="checkbox" role="checkbox" aria-checked="false">Enable</button>
+      <input id="native" type="checkbox"><input id="cancelled" type="checkbox">
+      <input id="disabled" type="checkbox" disabled>
+      <input id="first" type="radio" name="group" checked>
+      <input id="second" type="radio" name="group">
+      <script>
+      globalThis.clicks = {};
+      document.addEventListener('click', event => {
+        const target = event.target;
+        clicks[target.id] = (clicks[target.id] || 0) + 1;
+        if (target.id === 'cancelled') event.preventDefault();
+        if (target.getAttribute('role') === 'radio')
+          queueMicrotask(() => target.setAttribute('aria-checked', 'true'));
+        if (target.getAttribute('role') === 'checkbox')
+          queueMicrotask(() => target.setAttribute('aria-checked',
+            target.getAttribute('aria-checked') === 'true' ? 'false' : 'true'));
+      });
+      </script>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await run(page);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("check observes real ARIA radio state after the click checkpoint", async () => {
+  await checkedStateFixture(async (page) => {
+    const radio = page.getByRole("radio", { name: "Dated history" });
+    await radio.check();
+    assert.equal(await radio.isChecked(), true);
+    await radio.check();
+    assert.equal(await page.evaluate(() => clicks.radio), 1);
+  });
+});
+
+test("setChecked observes real ARIA checkbox state and remains idempotent", async () => {
+  await checkedStateFixture(async (page) => {
+    const checkbox = page.getByRole("checkbox", { name: "Enable" });
+    await checkbox.setChecked(true);
+    await checkbox.setChecked(true);
+    assert.equal(await checkbox.isChecked(), true);
+    await checkbox.uncheck();
+    await checkbox.uncheck();
+    assert.equal(await checkbox.isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.checkbox), 2);
+  });
+});
+
+test("checked actions retain native defaults, cancellation and disabled controls", async () => {
+  await checkedStateFixture(async (page) => {
+    const checkbox = page.locator("#native");
+    await checkbox.check();
+    await checkbox.check();
+    assert.equal(await checkbox.isChecked(), true);
+    await checkbox.uncheck();
+    assert.equal(await checkbox.isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.native), 2);
+    await assert.rejects(page.locator("#cancelled").check(), /Click did not change checked state/);
+    assert.equal(await page.locator("#cancelled").isChecked(), false);
+    await assert.rejects(page.locator("#disabled").check({ timeout: 25 }), /Timeout/);
+    assert.equal(await page.locator("#disabled").isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.disabled || 0), 0);
+    await page.locator("#second").check();
+    assert.equal(await page.locator("#first").isChecked(), false);
+    await assert.rejects(page.locator("#second").uncheck(), /Click did not change checked state/);
+    assert.equal(await page.locator("#second").isChecked(), true);
+  });
+});
+
 test("uncaught live handler exceptions emit Error payloads", async () => {
   const page = newPage();
   const errors = [];
@@ -3209,40 +3476,57 @@ test("Live checkbox actions execute one default and retain requested state (#351
 });
 
 test("navigation deadlines also cancel slow hydration (#427)", async () => {
+  const heldScripts = new Set();
+  let stallHydration = true;
   const server = createServer((req, res) => {
+    res.setHeader("cache-control", "no-store");
+    if (req.url === "/ready") return res.end("<body>Ready</body>");
     if (req.url === "/slow.js") {
-      setTimeout(() => {
-        res.setHeader("content-type", "application/javascript");
+      res.setHeader("content-type", "application/javascript");
+      if (stallHydration) {
+        heldScripts.add(res);
+        res.on("close", () => heldScripts.delete(res));
+        res.flushHeaders();
+      } else {
         res.end("document.body.dataset.loaded='yes'");
-      }, 180);
+      }
       return;
     }
     res.end('<body><script src="/slow.js"></script></body>');
   });
   const base = await listen(server);
   const page = newPage();
+  const recover = async (target) => {
+    // Retire held fixture responses before serving the same URL normally.
+    stallHydration = false;
+    for (const response of heldScripts) response.destroy();
+    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
+    assert.equal(page._targetId, target);
+    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+  };
   try {
+    await page.goto(`${base}/ready`, { timeout: 0, waitUntil: "domcontentloaded" });
+    assert.equal(await page.evaluate(() => document.body.textContent), "Ready");
+    const target = page._targetId;
+    assert.equal(typeof target, "string");
     await assert.rejects(
       page.goto(base, { timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
     assert.equal(page.isClosed(), false);
-    const target = page._targetId;
-    assert.equal(typeof target, "string");
-    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
     assert.equal(page._targetId, target);
-    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+    await recover(target);
+    stallHydration = true;
     await assert.rejects(
       page.reload({ timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
     assert.equal(page.isClosed(), false);
     assert.equal(page._targetId, target);
-    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
-    assert.equal(page._targetId, target);
-    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+    await recover(target);
   } finally {
     await page.close();
+    server.closeAllConnections();
     await new Promise((done) => server.close(done));
   }
 });

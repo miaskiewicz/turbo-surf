@@ -1099,7 +1099,16 @@ pub(super) fn op_form_data_entries<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     form: v8::Local<'s, v8::Value>,
     submitter: v8::Local<'s, v8::Value>,
+    document: v8::Local<'s, v8::Object>,
 ) -> v8::Local<'s, v8::Value> {
+    use turbo_dom_browser_env::host_internals::{current_document_context, enter_document_of};
+    // The private op realm does not identify a constructor's document after navigation.
+    let _document = enter_document_of(scope, document);
+    let Some(context) = current_document_context(scope) else {
+        fail(scope, "Native FormData owner context is unavailable");
+        return v8::undefined(scope).into();
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     crate::browser_env::begin_form_data_constructor_entries(scope, form, submitter)
         .map(Into::into)
         .unwrap_or_else(|| v8::undefined(scope).into())

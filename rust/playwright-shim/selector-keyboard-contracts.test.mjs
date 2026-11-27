@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
-import { keyboardDefaultsSource } from "./keyboard-defaults.mjs";
+import { applyKeyboardDefault, keyboardDefaultsSource } from "./keyboard-defaults.mjs";
 import { queryVisibleSelector } from "./visible-selector.mjs";
 
 // The adapter is the selector's supported seam: the algorithm owns relationships
@@ -146,7 +146,7 @@ test("ordinary DOM traversal uses element parents, siblings and native matches w
   assert.deepEqual(query(root, ":scope + section:visible"), []);
 });
 
-function keyboardControl(value = "", type = "text") {
+function keyboardControl(value = "", type = "text", serialized = false) {
   const events = [];
   class Input extends EventTarget {
     tagName = "INPUT";
@@ -177,13 +177,24 @@ function keyboardControl(value = "", type = "text") {
       this.data = options.data;
     }
   }
-  const realm = vm.createContext({ InputEvent });
-  vm.runInContext(keyboardDefaultsSource(), realm);
+  let apply = applyKeyboardDefault;
+  if (serialized) {
+    const realm = vm.createContext({ InputEvent });
+    vm.runInContext(keyboardDefaultsSource(), realm);
+    apply = realm.applyKeyboardDefault;
+  }
   const input = new Input();
   const press = (key, options = {}, hooks = {}) => {
     const event = { key, ...options };
-    for (const phase of ["keydown", "keyup"])
-      realm.applyKeyboardDefault(input, event, phase, hooks.replace, hooks.submit, hooks.click);
+    const prior = Object.getOwnPropertyDescriptor(globalThis, "InputEvent");
+    Object.defineProperty(globalThis, "InputEvent", { configurable: true, value: InputEvent });
+    try {
+      for (const phase of ["keydown", "keyup"])
+        apply(input, event, phase, hooks.replace, hooks.submit, hooks.click);
+    } finally {
+      if (prior) Object.defineProperty(globalThis, "InputEvent", prior);
+      else delete globalThis.InputEvent;
+    }
   };
   return { input, events, press };
 }
@@ -254,4 +265,11 @@ test("activation occurs on Enter-down or Space-up and requires the native hook",
   input.disabled = true;
   press(" ");
   assert.deepEqual(activations, [input, "submit"]);
+});
+
+test("serialized defaults run without module bindings", () => {
+  const { input, events, press } = keyboardControl("abc", "text", true);
+  press("Backspace");
+  assert.equal(input.value, "ab");
+  assert.equal(events[1][1], "deleteContentBackward");
 });

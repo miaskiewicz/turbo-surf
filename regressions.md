@@ -1,5 +1,303 @@
 # Release regressions
 
+## Validated v0.8.7 payroll acceptance — 2026-11-23
+
+The complete original auth suite passes on the packaged v0.8.7 native engine:
+**46 passed, 0 failed, 0 skipped, 0 cancelled, 0 retries**, across all 15 files,
+in 1,132.2 seconds. The shared fixture file remained byte-identical. Tests,
+assertions and per-case deadlines were unchanged; global setup, teardown and
+webServer were disabled for the existing coordinated service window. The native
+CLI does not enforce the config-level globalTimeout; the original per-case
+limits remained enforced.
+
+The tested production source is Surf `8b54914b7e369224e02d26d42c00a67a9cc48f64`,
+with turbo-dom `5ef97ac1618fe4fc563dd6a643418593c433f853` coherently pinned by
+Git revision. The actual locally installed platform NAPI artifact is SHA256
+`acd47b67366763ce39a969e2e42f4ec327329a2958f05ac85451aadd98995caf`.
+The validation head `9e77b6b9` adds only a deterministic Rust integration-test
+fixture; production code and packaged runtime JavaScript remain identical.
+Receipts live in the root checkout under
+`.recovery/transport-io-runtime/release/auth46/{RUN,RESULT}.json` and `run.log`;
+`ARTIFACT.json` records both native artifact hashes and compiled features.
+
+The previous completed full cohort was 42/46. Its four failed grant-revocation
+cases now pass both individually and in this full run. A real persistent-HTTP
+regression showed that synchronous guest work could starve pooled connection
+drivers and leave writes using closed sockets. The native transport now owns
+those drivers on a separate two-thread I/O runtime, with cancellation preserved
+and no added write retry. Interrupted fetches also terminate observed response
+records when their operation is dropped. Earlier navigation, Promise ownership,
+CSS resource and producer fixes remain included.
+
+Final offline gates passed: Rust workspace 2,296 passed, 0 failed, 7 existing
+ignored; strict workspace clippy, format and complexity checks; shim 878 passed,
+E2E 55 passed and detection 262 passed (their existing skips remain recorded in
+`JS-GATES.json`). The packaged MCP smoke and all three public modal document
+cycles passed without SIGABRT. This supersedes the historical blocker notes
+below. This is release-candidate validation, not registry publication; the
+producer Git development pin remains until the matching registry payload is
+published and verified. No tag or publication was performed.
+
+## Historical 2026-11-21 v0.8.7 payroll acceptance — native async ownership blocker
+
+On 2026-11-21, a fresh isolated default-feature release NAPI build of Surf
+`d1dd8878b7e19ea32c8b789f94fb77ac2522374a` with local unpublished turbo-dom
+`d00712fc01c9cb1a2a81ed11df2cd338f76d3541` fails the unchanged Flux super admin
+`delegatedWriteStep.spec.ts` case with `Native async work has unclassified ownership`.
+The signed artifact SHA256 is
+`9a6e75d6d5251ce198289a8e43dd833597957c10c9f2e4ac33538dc5c483b83c`.
+Actual compiled inputs and feature fingerprints are in Root
+`.recovery/payroll-v087-20261121/ARTIFACT.json`; all six Surf crates compiled fresh.
+The development DOM patch remains in use; this is not a registry release proof.
+
+The case passed real PropelAuth login, admin-shell navigation, read access, and
+the exact read-banner geometry assertions (height 44), then failed during the
+grant portion after 64.184 seconds. It did not reach the write-banner assertions.
+Result: 0 passed, 1 failed, 0 skipped, 0 canceled. The native failure-capture
+fixture also observed the authenticated admin shell. The first run did not identify which native guard rejected the action. The
+separately labeled diagnostic rerun below now confirms the same-root collected
+parent branch. Surf owns the repair; no producer defect is established.
+The independently reproduced collected-root-parent defect is fixed in `728fd61`;
+application causality is confirmed by the diagnostic run below. Restored-green
+application validation remains pending. The offline control and gate results
+below do not establish an auth pass.
+
+The service owner explicitly reserved ports 3000/3001 and paused edits/tests/writes
+for this single case. Frontend: the audit worktree at `7ad381b96` plus pending #772
+changes; backend: disposable flux-apis `b822541ab8f1ddfcc874096bcbf15b73a7c8e882`.
+The run consumed that worktree's freshly restored fixtures, with global setup,
+teardown, and webServer disabled; fixture JSON remained byte-identical. The owner
+then ran the exact Chromium case successfully (1 passed, 8.1-second case), including
+baseline revoke, grant, end-session, and afterEach cleanup. The service window is
+returned; further native service use requires another coordinated window.
+
+Current main-checkout auth inventory is 46 cases in 15 files. Do not combine that
+inventory with the single owner-worktree execution as if the whole suite ran.
+Fresh-artifact offline controls pass 34/34 (14 Promise/load-boundary controls and
+20 deadline/hydration controls), with zero skips/cancellations. Preserve the
+separate initial sandbox-listener EPERM attempt as an environment failure.
+Evidence: Root `.recovery/payroll-v087-20261121/owner-window/{PREP,RUN,RESULT}.json`,
+`run.log`, `artifacts/**/failure.json`, `offline-controls-localhost.log`, and
+`deadline-controls.log`; owner Chromium log `/tmp/codex-e2e-audit-restored-smoke.log`.
+No deadline, assertion, coverage floor, security policy, or exclusion was relaxed.
+
+An independent deterministic offline candidate now reproduces the same error
+without the application: retain a reaction child of an abandoned pending Promise,
+prove its parent was actually collected using the existing native GC barrier,
+then dispatch a real button click that opens a DOM modal. The click runs exactly
+once and opens the modal, but the action returns the ownership error. Awaiting
+the unresolved child still rejects; its reaction never runs. Retaining the live
+parent makes the identical action pass. Baseline: 1 passed, 1 failed, 0 ignored
+(Cargo exit 101), in 0.48 seconds after compilation. Test-only source is
+`.worktrees/payroll-v087-pending-parent-repro/rust/crates/turbo-surf-render/tests/pending_parent_action.rs`;
+receipt `.recovery/payroll-v087-20261121/pending-parent-repro.log`.
+This establishes an offline Surf defect, not yet application causality. A separate
+diagnostic-only NAPI build labels the original rejection site and numeric guard
+conditions, without changing selection or admission. Live use remains subject to
+a new explicit service-owner window. Production repair `728fd612` is locally integrated into `release/v0.8.7`, with
+fixture correction `9feee266` and evidence commit `69132a7b`. The development DOM
+patch is retained and must be dropped/replaced with the published dependency
+graph before any release tag; no tag or publication is part of this work.
+
+The candidate permits only the existing same-authenticated-root collected-parent
+classification for generic action/timer selection, preserving unresolved explicit
+completion, foreign/unknown parent, unowned operation, and inconsistent-owner
+rejections. The unchanged original modal regression passes; restoring the exact
+original production file reproduces its error (3 passed / 1 failed across four
+integration controls), and restoring the candidate byte-for-byte passes 13/13
+related action, Promise-parent, and native lifecycle tests. Four additional native
+guard controls pass, including a genuine unowned operation and collected unknown
+parent. The deliberately contradictory-registration test uses real native Promise
+and document identities as an invariant test. A new guard fixture initially failed
+to enter its destination context; its corrected setup and rerun are separately
+logged, with no production-policy change. Affected strict all-target Render Clippy,
+workspace formatting and workspace CC15 pass. The complete restored workspace
+gate passes 2,268 tests, zero failures, seven existing ignores (one live TLS echo
+and six documentation examples), zero filtered/canceled cases. Workspace
+all-target Clippy with denied warnings also passes. No application pass is claimed. The standalone
+pre-existing unicode-range assertion formatting issue is corrected with rustfmt.
+Receipts: Root `.recovery/payroll-v087-20261121/pending-parent-{candidate,guards-restored,inverse,related-restored}.log`,
+`inverse-source.json`, `CANDIDATE-SOURCE.json`, and `candidate-{fmt-restored,clippy,complexity-restored}.log`.
+
+### Confirmed application guard branch and full shim validation
+
+A second explicitly reserved two-minute window ran the exact diagnostic case
+with original production selection logic plus numeric error labels. It passed
+login, admin shell, read permission and exact read-banner geometry, then failed
+at 69.512 seconds with:
+`selection inconsistent=false unknown_ops=0 unknown_parents=4 collected_root_parents=4 strict=true`.
+This confirms the application hits the same collected, authenticated root-parent
+state as the deterministic modal regression. It is not an unknown operation or
+inconsistent owner. All 5,157 captured frontend/E2E source files and the shared
+fixture file remained unchanged during this run. The window was immediately
+returned; another live run requires a new explicit owner READY.
+
+The fixed signed artifact from clean commit `69132a7b` has SHA256
+`186a83cf4d855d8cf408bc48bd635fdf627fb8ee3aa9e332006bcbc34cdaf05e`.
+Its full standard shim suite passes 873 tests, zero failures/cancellations and
+one intentional skip that tests skipped bodies do not execute. Node's actual
+loaded-native report contains only this selected addon. The branch's package
+version remains 0.8.6 despite the v0.8.7 branch name. Exact native source, features,
+compiled package paths and library hash are recorded in Root
+`.recovery/payroll-v087-20261121/FIXED-ARTIFACT.json`; `fixed-shim.log` is the full
+exit-zero receipt. The archive identity and unchanged 2,075-file producer source
+comparison are recorded separately. This remains a local unpublished DOM graph.
+
+The current service-owner auth inventory is 46 tests in 15 files. One unique
+case has failed on the original and diagnostic artifacts; 45 cases remain unrun.
+The fixed artifact rerun below reaches a later modal wait failure. No full auth
+or broader payroll acceptance pass is claimed. Owner coordination, source/fixture hashes,
+exact command, counts and diagnostic guard data are preserved in
+`.recovery/payroll-v087-20261121/diagnostic-owner-window/`.
+
+### Fixed artifact follow-on: request-write modal does not appear
+
+A fresh explicitly reserved service window ran the exact Flux super admin case
+against fixed artifact `186a83cf...cdaf05e`. Login, admin navigation, read access,
+and read-banner geometry passed. The request-write click returned without the
+old ownership error, then the existing 30-second visible wait for
+`delegated-write-modal-note` timed out. The whole case took 99.970 seconds; this
+was a locator timeout, not the 120-second case deadline. Result: 0 passed,
+1 failed, zero skips/cancellations. No note fill or grant-create submit stage was
+reached; the original baseline revoke and afterEach remained enabled.
+
+Page error and console error captures are empty. All 5,157 captured served source
+files and the fixture JSON stayed unchanged during this window. The owner
+confirms API image `flux-apis:codex-e2e-audit`, commit `6e6e54e4b` (cleanup PR #1254),
+with no restart during the run. The window was immediately returned; shared
+service usage is again explicitly held for #772. The owner then ran the exact Chromium case on the same backend commit:
+1 passed, zero skipped, 7.8-second case (8.3 seconds total), including read/write
+banners, grant end, and afterEach cleanup. The earlier different-backend control
+is not substituted for this new one.
+
+The new failure's root cause and ownership remain unproven. Basic offline
+React/MUI Button+Dialog controls pass. A separate plain-DOM probe shows a
+potential frozen-target mechanism: replacing a child during focus/mousedown can
+leave later shim events on that detached child. A separately identified Chrome 159.0.8154.6 oracle (the pinned 156 binary was
+unavailable) also suppresses the final button click in both replacement modes;
+the unchanged-child contrast opens normally in both engines. Thus this does not
+explain the application modal failure and no production retargeting change is
+justified. Chrome does send pointerup/mouseup to the replacement node while the
+shim dispatches on its detached prior target; that independent event-path
+difference remains tracked, unintegrated, and without application-causal proof.
+The oracle used the required wrapper with an explicit existing-binary override,
+localhost-only flags and no download. Fix SHA for the modal failure: none.
+
+Regression subset remains the exact original delegated-write case, with the
+narrow offline controls under Root `.recovery/modal-repro/`. Full run/error,
+source/fixture identities and result receipt are under
+`.recovery/payroll-v087-20261121/fixed-owner-window/`. The same one unique auth case
+remains failed; 45 auth cases are unrun.
+
+A subsequent reserved observer window on API commit `67b11bdb6` and owner-declared
+frontend `70267af6c` plus frozen WIP reproduces the modal timeout in 77.557 seconds
+(0 passed, 1 failed, zero skips/cancellations). The complete pointer/mouse/click
+sequence reaches the same connected request-write button. ViewAsIndicator's
+React lanes change from 0 to 2 and remain 2 after the wait, while its modal hook
+stays false and synchronous guest DOM reads find no note. This supports an update
+being queued without committing; it does not establish the precise engine cause.
+The bounded ancestor walk misses HostRoot, so no root scheduler state is inferred.
+This window used the owner's explicit source freeze agreement rather than new
+per-file source hashes; the fixture file stayed unchanged. Receipts are under
+Root `.recovery/payroll-v087-20261121/observer-owner-window/`.
+
+The observer uses passive listeners, synchronous no-drain reads, and selected
+boolean/lane metadata. Offline controls verify one real handler, live/cached
+modal agreement, and omission of a sensitive sentinel. Diagnostic perturbation
+is explicitly labeled. A separate repeated-navigation FluxUI control now aborts
+in the binding's selection scheduler on the second document; plain DOM and pure
+React contrasts pass. That crash is being reduced independently and is not yet
+attributed as the application's modal cause. Services have returned to HOLD.
+No deadline, assertion, fixture premise, error policy, or exclusion is relaxed.
+
+The next owner-reserved window used diagnostic artifact `a2630814...91b91b`
+(source `a11ff6f6` plus bounded termination logging) against frontend
+`a11863430` and backend `f2073bb695933e7907adbe807260f2ad51454ca2`.
+The original case fails in 82.418 seconds, 0 passed / 1 failed, no skips or
+cancellations, with the fixture file unchanged. Direct document HostRoot reads
+now succeed: pending lanes 2050, callback priority 0 and no callback are present
+before the request-write click and remain afterward. ViewAs lanes change 0 to 2
+without opening the modal. A genuine session watchdog requests V8 termination
+at its unchanged 10,000 ms budget (elapsed 10,002 ms, accepted=true). The record
+lacks a wall timestamp, so its exact phase and causal relationship remain
+unproven. No collect-rejection records appear. This diagnostic covers only the
+session/caller watchdog and poll-supervisor families; absence of other stop
+records is not an all-path claim. The service window was returned immediately.
+Receipts: Root `.recovery/payroll-v087-20261121/termination-owner-window-ready/`
+and `.recovery/react-pending-diag/ARTIFACT.json`. The initial sandbox-denied
+connection attempt is separately preserved under `termination-owner-window/`.
+
+The independent second-document crash is now reduced to public React 18.3.1,
+MUI 9.5.0 and `posthog-js/react` 1.447.3 with public Page/Locator calls only.
+Native aborts in `dom_ownership::local → html_popover::schedule_after →
+selection::dispatch`; Chrome 159.0.8154.6 passes all three documents. Producer
+investigation [turbo-dom #540](https://github.com/miaskiewicz/turbo-dom/issues/540)
+is filed under v0.8.7 with portable source, provenance and sanitized backtrace.
+The actual scheduler document identity and application-modal connection remain
+unproven. Packet: Root `.recovery/react-modal-drain/public-repro-packet/`.
+
+### Producer #540 integration and broader auth sweep — 2026-11-22
+
+Producer fix `6f24c1488d596f72b49f6fec78fdd1bc1a97bd8c` resolves the captured
+scheduler from the current V8 context. Surf's four local DOM patch paths now
+refer coherently to its immutable archived snapshot, committed as `fe54c15`.
+No canonical producer checkout was changed; this remains a development patch
+to replace with registry 0.8.7 after publication and before tagging Surf.
+The actual rebuilt NAPI addon has SHA256
+`f3373776f0d1889a564e8fc70c5b65ce07892a70129891765fa9d936b903b1e5`.
+The unchanged public three-document repro completes all three click/note cycles,
+exit 0, no SIGABRT. This closes the integrated crash reproduction only.
+
+With explicit user takeover of ports 3000/3001, existing API/workers/outbox and
+frontend were restarted without resets, migrations, reaper or fixture changes.
+Frontend is `86303955d4c7b7bd0cfa6db151e90d18d88a460a`; backend remains
+`f2073bb695933e7907adbe807260f2ad51454ca2`. The first cold auth retry hits its
+unchanged 120-second case deadline after login/read-banner checks. The broader
+46-case serial sweep reproduces all five delegated-write modal failures; its
+first three completed files total nine passes and five failures. Employer-admin's
+add-employee case also fails. The full baseline sweep subsequently finishes: **23 passed, 23 failed, zero
+skipped/canceled, all 46 selected cases executed**. Its 3,875.887-second wall
+duration includes two controller-only pauses between files; current browser
+workers were allowed to finish original deadlines and cleanup before either
+exclusive handoff/probe. The frozen original shim and addon f337 were retained
+throughout. Per-case 120-second limits were enforced. The runner does not yet
+enforce the application config's suite-wide globalTimeout; that separate CLI
+contract remains open. These failed diagnostic results are not acceptance.
+
+An independent Surf error-propagation defect is fixed in `d789ec02`: `_redrain`
+previously swallowed ownership, driver execution-budget and transport failures
+as aggregate expiry. Three tests fail with missing rejection before the repair
+and in its exact inverse; the restored fix retains original error identity.
+All 15 hydration controls and the full offline shim suite pass: 876 passed,
+zero failures/cancellations, one existing intentional skip. Ordinary aggregate
+expiry retains its reached-state behavior. This is honest error reporting, not
+proof of the modal's cause or repair. The combined DOM-pin/error-propagation
+phase passes 2,268 Rust workspace tests (zero failures, seven existing ignores),
+strict workspace/all-target Clippy, formatting and complexity. The timestamped
+probe independently records three poll-supervisor interruptions before the CTA
+and ultimately reaches the original 120-second case deadline; no CPU cause is
+inferred from termination alone. Receipts are under Root
+`.recovery/dom540-6f24c148/`.
+
+## v0.8.7 unicode-range workspace test compilation
+
+The first full workspace gate on the candidate stops before test execution with
+Rust E0063 at `turbo-surf-mcp/src/lib.rs:7436`: the existing
+`fetch_font_face_skips_unresolvable_and_refused_urls` test omits the newly added
+`WebFontSource.unicode_range` field from release commit `d302301a`. The fixture
+now explicitly uses an empty range vector, the documented no-descriptor default;
+its existing failure-path assertion is unchanged. The independent existing
+Render unicode-range assertion is rustfmt-normalized. No runtime logic, coverage
+floor, or test scope changes. Corrected in `9feee26`; the restored full workspace gate passes as recorded above. Receipts:
+Root `.recovery/payroll-v087-20261121/candidate-workspace-test{,-restored}.log`.
+
+Offline regression subset: `cd rust && cargo test -p turbo-surf-render --test pending_parent_action`
+and `cargo test -p turbo-surf-render --lib selection_guard_tests` (four controls
+each). The exact baseline production inverse preserves all assertions and fails
+the original modal control; the candidate restoration is byte-identical.
+
+## Historical v0.8.5 work
+
 Target: `release/v0.8.5`. Updated 2026-11-19.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
@@ -1345,3 +1643,45 @@ At `682e8ac9`, ordinary Linux Rust passes while LLVM Render-A again exceeds the 
 Every hook was still rediscovering ownership through the captured async-context getter even when the native Promise already had an immutable authenticated owner. Actual baseline fanout records 524318 discoveries for 131083 native Init events; the new work-count assertion fails after the original results, task ordering and deadline premises pass. The repair handles only non-Init hooks with no parent, matching the genuine native Promise private identity and weak Promise object and requiring an existing Some owner. Init, unknown, missing, pruned, tracking-error and unmatched-identity paths retain the original discovery logic. No unknown owner is cached as Root, no strong Promise/context root is added, and selection still revalidates native document leases and retirement. Native state observation, reaction flags and maintenance are preserved once per hook.
 
 Final ordinary validation passes 27 controls; LLVM validation passes those 27 plus the same three workloads with two test threads. Fanout discovery calls fall to 131083, exactly its Init count, with 393235 authenticated reuse hits. The unchanged 32768 LLVM fanout completes in 0.864s serially and 1.815s concurrently on the measured host; these are contextual local measurements, not a guarantee of current Linux CI performance. Genuine unknown-infrastructure, pruned identity, foreign errors, retired-root/peer lifetime, parent collection and module isolation controls pass. Render/NAPI all-target Clippy with denied warnings, workspace formatting and modified Rust CC15 pass. Proof is under `.worktrees/promise-owner-discovery/.recovery/owner-discovery/{baseline,final-on,llvm,strict}`. Current Linux confirmation and refreshed affected release artifacts remain pending; no execution limit, workload, assertion ceiling or coverage floor is raised.
+
+
+### Font discovery snapshot repair and text-provenance follow-on
+
+A statistical native CPU sample of an actual auth worker spends most of its
+active actor samples under window-timer dispatch → live element geometry →
+web_fonts::report_used → stylesheet enumeration. This is diagnostic call-path
+support, not an elapsed-time speedup claim. A native work-count fixture proves
+that one document.fonts query refreshes StyleSheetList.length 66 times for 65
+sheets. An authored throwing list getter also hides all four expected font-set
+states. Chromium159.0.8154.6 observes zero public-list reads and sizes [1,2,1,0]
+while sheets are added and removed, including with the authored getter.
+
+Candidate613053978f41b35de9dfef1470ae12389a131d08 captures the existing private
+cssHost.readSheets snapshot once per discovery. No persistent cache, CSS epoch
+assumption, source limit or deadline changes. The only native source difference
+against the preserved baseline addon is font_loading.js. Both native controls
+fail on the old addon, pass on the candidate, fail in the preserved inverse, and
+pass after restoration. All eight Rust font integration controls and the full
+shim suite pass (876 passed, zero failed/canceled, one existing intentional skip).
+The candidate addon SHA256 is
+4682d23e462e55f4c18258b58ca8eaef92ff37852964e04dec57a7c8c334a576.
+It is still on the isolated font-snapshot branch pending release integration and
+combined default-profile validation. Receipts: Root .recovery/font-sheet-snapshot/.
+
+The original app case with this addon and the same frozen shim fails in39.097s
+while checking request-write visibility, before the CTA click, with native text
+provenance exceeding its budget. This is not a modal pass or a controlled
+end-to-end performance comparison. Three baseline login/return-URL cases report
+the same native error. A separate literal-HTML reduction proves that a tiny
+button works beside900,000 inert JSON-script characters but geometry rejects at
+1,000,100, below the live2,000,000 raw-source cap. The producer text preflight
+charges all styled text, including display:none script descendants, against its
+1,000,000-character allowance. The visible-large negative control still rejects.
+Chromium159 renders the button in both inert cases; script display is none.
+
+Producer investigation [turbo-dom#541](https://github.com/miaskiewicz/turbo-dom/issues/541)
+is filed under v0.8.7 with the portable driver, Rust reproduction, source evidence,
+and preserved-limit requirements. Which text consumes the actual app's quota is
+not yet measured; matching errors alone are not full application-causal proof.
+The user must manually relay this issue; no producer agent notification is claimed.
+Services were explicitly returned to the audit owner after the app retry.

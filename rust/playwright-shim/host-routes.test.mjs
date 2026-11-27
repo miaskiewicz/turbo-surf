@@ -666,3 +666,43 @@ test("retiring a frame cancels its paused host route while the owner remains usa
     await canceled;
     assert.equal(await page.evaluate(() => document.title), "host routes");
   }));
+
+test("a click releases while its intercepted response is held across same-document back", async () =>
+  fixture(async (page, origin, received) => {
+    await page.goto(origin, { waitUntil: "networkidle" });
+    await page.evaluate(() => {
+      window.documentMarker = 42;
+      history.pushState({}, "", "?history");
+    });
+    const fetched = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let deadline;
+    try {
+      await page.route("**/api", async (route) => {
+        const upstream = await route.fetch();
+        fetched.resolve(upstream.status());
+        await release.promise;
+        await route.fulfill({ response: upstream });
+      });
+      const response = page.waitForResponse((entry) => entry.url() === origin + "/api");
+      void response.catch(() => {});
+      const watchdog = new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error("Click waited for the held route")), 5000);
+      });
+      const [status] = await Promise.race([
+        Promise.all([fetched.promise, page.locator("#fetch").click()]),
+        watchdog,
+      ]);
+      assert.equal(status, 200);
+      assert.equal(await page.goBack(), null);
+      assert.equal(await page.evaluate(() => window.documentMarker), 42);
+      release.resolve();
+      const delivered = await response;
+      assert.equal(delivered.status(), 200);
+      assert.equal(await delivered.finished(), null);
+      assert.equal(received.filter((entry) => entry.url === "/api").length, 1);
+    } finally {
+      clearTimeout(deadline);
+      release.resolve();
+    }
+  }));

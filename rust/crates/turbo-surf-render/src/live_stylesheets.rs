@@ -2,7 +2,7 @@
 //! evaluation belong to the host, rather than a page-replaceable JS getter.
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SheetSnapshot {
     #[serde(default)]
@@ -15,7 +15,7 @@ pub(crate) struct SheetSnapshot {
     pub(crate) rules: Vec<RuleSnapshot>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuleSnapshot {
     #[serde(skip)]

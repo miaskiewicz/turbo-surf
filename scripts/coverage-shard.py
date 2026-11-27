@@ -13,8 +13,9 @@ CI shards the workspace because a single instrumented link of every test binary
 exhausts the ubuntu runner (rust-lld bus error, run 40788261228).
 
 --chunks N (one crate only) splits the crate's tests/ targets into N runs over the same
-instrumented build (the first also runs the lib tests), deleting the LLVM profraws
-between runs and unioning the N reports into the shard report. Every test process
+instrumented dependency build (the first also runs the lib tests). Between runs,
+delete LLVM profraws and reclaim the selected crate’s build artifacts. Union the N
+reports into the shard report. Every test process
 writes a profraw holding the counters of all instrumented code, so one run of every
 turbo-surf-render test binary filled the runner's 145G disk (run 40899746815).
 """
@@ -91,6 +92,22 @@ def parse(argv):
     return shard, chunks, slice_index, slice_total, rest
 
 
+def mark_coverage_cache(directory):
+    """Tarpaulin can create the target directory before Cargo can tag it."""
+    target = Path.cwd() / "target"
+    directory = Path(directory).resolve()
+    if not directory.is_relative_to(target) or directory == target:
+        raise ValueError("The coverage cache must be a dedicated subdirectory of target/")
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        with (directory / "CACHEDIR.TAG").open("x") as tag:
+            tag.write("Signature: 8a477f597d28d172789f06886806bc55\n")
+            tag.write("# Turbo-Surf instrumented Cargo build cache.\n")
+    except FileExistsError:
+        # Let Cargo validate a tag already present.
+        pass
+
+
 def run_chunked(config, shard, crate, chunks, slice_index=0, slice_total=1):
     tests = [p.stem for p in Path("crates", crate, "tests").glob("*.rs")]
     all_targets = chunk_targets(tests, chunks)
@@ -119,6 +136,16 @@ def run_chunked(config, shard, crate, chunks, slice_index=0, slice_total=1):
         else:
             print(f"{shard}: chunk {i + 1} produced no coverage report", file=sys.stderr)
             status = status or 1
+        if i + 1 < len(all_targets):
+            # Completed integration binaries can fill the disk before the next
+            # chunk links. Keep dependency artifacts and the in-memory reports.
+            mark_coverage_cache(config["target-dir"])
+            clean = subprocess.call(
+                ["cargo", "clean", "--target-dir", config["target-dir"], "-p", crate]
+            )
+            if clean:
+                status = status or clean
+                break
     shutil.rmtree(profraws, ignore_errors=True)
     merged = union_reports(reports)
     with open(report_path, "w") as f:

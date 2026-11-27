@@ -46,11 +46,20 @@ impl Sample {
     }
 }
 
-pub(super) async fn drain(rt: &mut JsRuntime, target: u64) -> Result<(), String> {
+// Explicit actions hand newly admitted navigation to the commit waiter before
+// obsolete document IO can hold their interaction drain open.
+pub(super) async fn drain(
+    rt: &mut JsRuntime,
+    target: u64,
+    navigation: Option<target_action_completion::ActionNavigation>,
+) -> Result<(), String> {
     let mut stable = 0;
     let mut signature = String::new();
     for _ in 0..500 {
         tokio::task::yield_now().await;
+        if navigation_admitted(rt, navigation)? {
+            return Ok(());
+        }
         // Keep actual script discovery/admission in its original target realm,
         // but leave every timer to the native, one-task cooperative scheduler.
         auxiliary_pages::target_call(
@@ -59,8 +68,8 @@ pub(super) async fn drain(rt: &mut JsRuntime, target: u64) -> Result<(), String>
             "startInteractionHydrate",
             &[],
         )?;
-        let turn = async_owner::quiescence_turn(rt, target, true).await?;
-        if turn.host_reply {
+        let turn = next_turn(rt, target, navigation).await?;
+        if turn.host_reply || navigation_admitted(rt, navigation)? {
             return Ok(());
         }
         let sample = Sample::capture(rt, target, &turn)?;
@@ -82,4 +91,23 @@ pub(super) async fn drain(rt: &mut JsRuntime, target: u64) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+fn navigation_admitted(
+    rt: &JsRuntime,
+    navigation: Option<target_action_completion::ActionNavigation>,
+) -> Result<bool, String> {
+    navigation.map_or(Ok(false), |navigation| navigation.admitted(rt))
+}
+
+async fn next_turn(
+    rt: &mut JsRuntime,
+    target: u64,
+    navigation: Option<target_action_completion::ActionNavigation>,
+) -> Result<async_owner::QuiescenceTurn, String> {
+    if let Some(navigation) = navigation {
+        async_owner::action_quiescence_turn(rt, target, navigation).await
+    } else {
+        async_owner::quiescence_turn(rt, target, true).await
+    }
 }

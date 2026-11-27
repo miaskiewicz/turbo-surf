@@ -430,7 +430,7 @@ pub(super) fn admitted(
             snapshot,
             activity: Some(network.begin_page_navigation(&request.target_id.0.to_string())),
         });
-        auxiliary_navigation::cancel(&mut state, request.target_id.0);
+        auxiliary_navigation::supersede(&mut state, request.target_id.0);
     }
 }
 
@@ -622,7 +622,7 @@ pub(super) fn queue_navigation_mode(
         snapshot,
         activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
-    auxiliary_navigation::cancel(&mut state, target.0);
+    auxiliary_navigation::supersede(&mut state, target.0);
     true
 }
 
@@ -842,13 +842,29 @@ impl PageSession {
         let value = async_owner::with_document(scope, context, |scope| {
             crate::browser_env::run_engine_script(scope, source)
         })?
-        .ok_or("Target engine script failed")?;
+        .ok_or_else(|| {
+            if scope.has_terminated() || scope.is_execution_terminating() {
+                return "Target engine read execution terminated".to_owned();
+            }
+            scope
+                .exception()
+                .map(|error| error.to_rust_string_lossy(scope))
+                .unwrap_or_else(|| "Target engine script failed".to_owned())
+        })?;
         if value.is_promise() {
             return Err("Target engine read must return a synchronous value".into());
         }
         let result = v8::json::stringify(scope, value).map(|json| json.to_rust_string_lossy(scope));
         publish(scope);
-        result.ok_or_else(|| "Target engine result could not be serialized".to_owned())
+        result.ok_or_else(|| {
+            if scope.has_terminated() || scope.is_execution_terminating() {
+                return "Target engine read execution terminated".to_owned();
+            }
+            scope
+                .exception()
+                .map(|error| error.to_rust_string_lossy(scope))
+                .unwrap_or_else(|| "Target engine result could not be serialized".to_owned())
+        })
     }
 
     pub fn serialize_target(&mut self, target: u64) -> Result<String, String> {
@@ -1059,7 +1075,18 @@ impl PageSession {
         collect: bool,
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
-        key.during(self.eval_target_engine_active(target, source, collect))
+        key.during(self.eval_target_engine_active(target, source, collect, None))
+            .await
+    }
+
+    pub(super) async fn eval_target_action_engine(
+        &mut self,
+        target: u64,
+        source: &str,
+        navigation: target_action_completion::ActionNavigation,
+    ) -> Result<String, String> {
+        let key = self.rt.activation_key();
+        key.during(self.eval_target_engine_active(target, source, false, Some(navigation)))
             .await
     }
 
@@ -1068,6 +1095,7 @@ impl PageSession {
         target: u64,
         source: &str,
         collect: bool,
+        navigation: Option<target_action_completion::ActionNavigation>,
     ) -> Result<String, String> {
         auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
         let expression = format!("(() => {{ {source}\n; return globalThis.__RESULT == null ? '' : String(globalThis.__RESULT); }})()");
@@ -1088,7 +1116,7 @@ impl PageSession {
                     .await?,
                 );
                 if !collect {
-                    target_quiescence::drain(&mut self.rt, target).await?;
+                    target_quiescence::drain(&mut self.rt, target, navigation).await?;
                 }
                 Ok(())
             }),
@@ -1561,7 +1589,7 @@ pub(super) fn queue_history_navigation(
         snapshot,
         activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
-    auxiliary_navigation::cancel(&mut state, target.0);
+    auxiliary_navigation::supersede(&mut state, target.0);
     Ok(())
 }
 

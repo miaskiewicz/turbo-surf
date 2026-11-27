@@ -16,6 +16,12 @@ const native = createRequire(import.meta.url)("../crates/turbo-surf-napi/index.j
 async function fixture(run) {
   const timers = new Set();
   const requests = [];
+  const heldScripts = new Set();
+  let holdScripts = false;
+  const setScriptHold = (held) => {
+    holdScripts = held;
+    if (!held) for (const response of heldScripts) response.destroy();
+  };
   const schedule = (callback, delay) => {
     const timer = setTimeout(() => {
       timers.delete(timer);
@@ -26,6 +32,14 @@ async function fixture(run) {
   const server = createServer((request, response) => {
     requests.push(request.url);
     if (request.url === "/slow.js") {
+      response.setHeader("cache-control", "no-store");
+      if (holdScripts) {
+        heldScripts.add(response);
+        response.on("close", () => heldScripts.delete(response));
+        response.setHeader("content-type", "application/javascript");
+        response.flushHeaders();
+        return;
+      }
       schedule(() => {
         response.setHeader("content-type", "application/javascript");
         response.end("document.body.dataset.loaded='yes'");
@@ -93,8 +107,9 @@ async function fixture(run) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const context = new shim.BrowserContext();
   try {
-    await run({ context, origin, requests });
+    await run({ context, origin, requests, setScriptHold });
   } finally {
+    setScriptHold(false);
     await context.close();
     for (const timer of timers) clearTimeout(timer);
     server.closeAllConnections();
@@ -149,14 +164,16 @@ test(
   "navigation deadline after response commit retains a complete owned backing",
   { timeout: 10000 },
   () =>
-    fixture(async ({ context, origin }) => {
+    fixture(async ({ context, origin, setScriptHold }) => {
       const page = await context.newPage();
       await page.goto(`${origin}/after`, { timeout: 0, waitUntil: "networkidle" });
       const target = actualTarget(page);
+      setScriptHold(true);
       await assert.rejects(
         page.reload({ timeout: 30, waitUntil: "networkidle" }),
         /timeout after 30ms/,
       );
+      setScriptHold(false);
       await recover(page, origin, target);
     }),
 );
@@ -407,3 +424,48 @@ test(
       await recover(page, origin, target);
     }),
 );
+
+test("authored redirect reports interruption rather than closure for a held goto", async () => {
+  let gate;
+  let gateOpened;
+  const gateReady = new Promise((resolve) => {
+    gateOpened = resolve;
+  });
+  let held;
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url);
+    if (request.url === "/gate") {
+      gate = response;
+      gateOpened();
+    } else if (request.url === "/held") {
+      held = response;
+      gate.end("redirect");
+    } else response.end(`<!doctype html><body>${request.url}</body>`);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const context = new shim.BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/source`);
+    await page.evaluate(() => {
+      globalThis.redirectReady = fetch("/gate").then(() => location.assign("/winner"));
+    });
+    await gateReady;
+    await assert.rejects(
+      page.goto(`${origin}/held`, { waitUntil: "commit", timeout: 3000 }),
+      /Navigation interrupted by another navigation/,
+    );
+    await page.waitForURL("**/winner", { timeout: 3000 });
+    assert.equal(await page.locator("body").textContent(), "/winner");
+    assert.equal(page.isClosed(), false);
+    assert.deepEqual(requests, ["/source", "/gate", "/held", "/winner"]);
+  } finally {
+    held?.end("<body>superseded</body>");
+    gate?.end();
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

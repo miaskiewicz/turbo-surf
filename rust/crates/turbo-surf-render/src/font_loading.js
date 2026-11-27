@@ -18,7 +18,7 @@
   let __fontRect = null;
   const __fontRoot = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
   const __fontCssText = Object.getOwnPropertyDescriptor(CSSRule.prototype, "cssText").get;
-  const __fontSheets = Object.getOwnPropertyDescriptor(Document.prototype, "styleSheets").get;
+  const __fontSheets = ops.op_interface_record_get(__fontDocument).cssHost.readSheets;
   const __fontDescriptor = (css) => JSON.parse(ops.op_font_face_rule(css));
   const __fontWeight = (text) => {
     const word = String(text || "normal")
@@ -278,7 +278,7 @@
   const documentFaces = () => {
     const out = [];
     try {
-      const list = __intrinsicApply(__fontSheets, __fontDocument, []);
+      const list = __fontSheets();
       for (let index = 0; index < list.length; index++) {
         const sheet = list[index];
         if (sheet.disabled) continue;

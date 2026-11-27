@@ -1,3 +1,4 @@
+import { clickScrollBootstrap, scrollClickTarget } from "./click-scroll.mjs";
 /* eslint-disable no-underscore-dangle, eqeqeq, prefer-const, no-await-in-loop, unicorn/consistent-function-scoping, no-unused-vars, no-array-reverse */
 // A Playwright-shaped façade backed by the turbo-surf native (Rust) addon.
 // No browser, no Chromium: `goto` fetches over Rust+reqwest, the read/locator/
@@ -16,6 +17,7 @@
 
 import { createTestOutput } from "./test-output.mjs";
 import {
+  checkedState,
   handleEvaluation,
   hasJSHandles,
   ensureHandleSession,
@@ -34,9 +36,9 @@ import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs"
 import {
   emitNativeFrameNavigation,
   hasNativeHistory,
-  notifyNativeHistory,
+  notifyNativeHistoryAcknowledged,
   retiredNativeHistoryTarget,
-  syncNativeHistory,
+  syncNativeHistoryAcknowledged,
 } from "./history-snapshot.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
@@ -570,6 +572,78 @@ function responseBudget(value) {
   return value;
 }
 
+function animationReadinessName(error) {
+  return /^(?:Error: )*native live layout animation resource is unsupported: (.+)$/.exec(
+    String(error?.message ?? error),
+  )?.[1];
+}
+
+function captureGeometryAnimations(element) {
+  const records = [];
+  for (let node = element; node; node = __tsNs.tcLocatorParent(node)) {
+    for (const animation of node.getAnimations()) {
+      if (typeof animation.animationName !== "string") continue;
+      const effect = animation.effect;
+      records.push({
+        node,
+        animation,
+        effect,
+        target: effect?.target,
+        name: animation.animationName,
+        state: animation.playState,
+        rate: animation.playbackRate,
+        timing: effect?.getComputedTiming(),
+      });
+    }
+  }
+  return records;
+}
+
+function finiteGeometryTiming(timing, rate) {
+  return (
+    timing &&
+    Number.isFinite(rate) &&
+    rate > 0 &&
+    Number.isFinite(timing.endTime) &&
+    Number.isFinite(timing.activeDuration) &&
+    ["none", "auto"].includes(timing.fill)
+  );
+}
+
+function unchangedGeometryAnimation(record, records) {
+  const { node, animation, effect, target, name } = record;
+  if (
+    !node.isConnected ||
+    animation.effect !== effect ||
+    effect?.target !== target ||
+    !["running", "finished"].includes(animation.playState) ||
+    !finiteGeometryTiming(effect?.getComputedTiming(), animation.playbackRate)
+  )
+    return false;
+  return node
+    .getAnimations()
+    .every(
+      (current) =>
+        current.animationName !== name ||
+        records.some((prior) => prior.node === node && prior.animation === current),
+    );
+}
+
+function finiteGeometryReadiness(error, records) {
+  const name = animationReadinessName(error);
+  if (!name) return false;
+  const matching = records.filter((record) => record.name === name);
+  return (
+    matching.length > 0 &&
+    matching.every(
+      (record) =>
+        record.state === "running" &&
+        finiteGeometryTiming(record.timing, record.rate) &&
+        unchangedGeometryAnimation(record, records),
+    )
+  );
+}
+
 function renderedVisibility(element) {
   for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
     if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
@@ -591,6 +665,109 @@ function renderedVisibility(element) {
   }
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
+}
+
+const waitingVisibilitySource = `function(element) {
+  const renderedVisibility = ${renderedVisibility.toString()};
+  const animationReadinessName = ${animationReadinessName.toString()};
+  const captureGeometryAnimations = ${captureGeometryAnimations.toString()};
+  const finiteGeometryTiming = ${finiteGeometryTiming.toString()};
+  const unchangedGeometryAnimation = ${unchangedGeometryAnimation.toString()};
+  const finiteGeometryReadiness = ${finiteGeometryReadiness.toString()};
+  try { return renderedVisibility(element); }
+  catch (error) { if (!animationReadinessName(error)) throw error; }
+  const records = captureGeometryAnimations(element);
+  const captureHitTestAnimations = ${captureHitTestAnimations.toString()};
+  const finiteHitTestReadiness = ${finiteHitTestReadiness.toString()};
+  const dependencies = captureHitTestAnimations(element);
+  try { return renderedVisibility(element); }
+  catch (error) {
+    if (finiteGeometryReadiness(error, records) || finiteHitTestReadiness(error, dependencies))
+      return undefined;
+    throw error;
+  }
+}`;
+
+function captureHitTestAnimations(element) {
+  const records = [];
+  for (const animation of element.ownerDocument.getAnimations()) {
+    const effect = animation.effect;
+    const node = effect?.target;
+    if (
+      typeof animation.animationName !== "string" ||
+      node?.ownerDocument !== element.ownerDocument
+    )
+      continue;
+    records.push({
+      node,
+      animation,
+      effect,
+      target: node,
+      name: animation.animationName,
+      state: animation.playState,
+      rate: animation.playbackRate,
+      timing: effect.getComputedTiming(),
+    });
+  }
+  return records;
+}
+
+function clickHitTestReady(element, options) {
+  let node = element,
+    branched = !!options?.position;
+  while (node.firstElementChild) {
+    branched ||= node.childElementCount > 1;
+    node = node.firstElementChild;
+  }
+  if (!branched) return true;
+  const rect = element.getBoundingClientRect();
+  const position = options?.position || { x: rect.width / 2, y: rect.height / 2 };
+  const hit = element.ownerDocument.elementFromPoint(rect.left + position.x, rect.top + position.y);
+  // A null or ancestor hit can be resolved by the dispatch's scroll step.
+  // A separate covering element must stop the click before input is sent.
+  return !hit || __tsNs.tcLocatorContains(element, hit) || __tsNs.tcLocatorContains(hit, element);
+}
+
+function finiteHitTestReadiness(error, records) {
+  const name = animationReadinessName(error);
+  return (
+    finiteGeometryReadiness(error, records) &&
+    records
+      .filter((record) => record.name === name)
+      .every((record) => getComputedStyle(record.node).pointerEvents === "none")
+  );
+}
+
+const waitingClickHitTestSource = `function(element, options) {
+  const clickHitTestReady = ${clickHitTestReady.toString()};
+  const animationReadinessName = ${animationReadinessName.toString()};
+  const captureHitTestAnimations = ${captureHitTestAnimations.toString()};
+  const finiteGeometryTiming = ${finiteGeometryTiming.toString()};
+  const unchangedGeometryAnimation = ${unchangedGeometryAnimation.toString()};
+  const finiteGeometryReadiness = ${finiteGeometryReadiness.toString()};
+  const finiteHitTestReadiness = ${finiteHitTestReadiness.toString()};
+  try { return clickHitTestReady(element, options); }
+  catch (error) { if (!animationReadinessName(error)) throw error; }
+  const records = captureHitTestAnimations(element);
+  try { return clickHitTestReady(element, options); }
+  catch (error) {
+    if (finiteHitTestReadiness(error, records)) return undefined;
+    throw error;
+  }
+}`;
+
+const clickOrFillReadySource = `function(element, options) {
+  const enabled = !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true";
+  const editable = !element.readOnly;
+  const visible = (${waitingVisibilitySource})(element);
+  if (!enabled || (options.kind === "fill" && !editable) || !visible) return false;
+  return options.kind !== "click" || (${waitingClickHitTestSource})(element, options);
+}`;
+
+class InteractionTargetMissing extends Error {
+  constructor() {
+    super("turbo-surf: locator matched no elements");
+  }
 }
 
 class Locator {
@@ -1043,30 +1220,46 @@ class Locator {
 
   // --- accessors (node-handle backed; cross to Rust) ---
   async getAttribute(name) {
+    if (this._page._live && typeof name === "string")
+      return this._liveRead((element, name) => __tsNs.tcLocatorAttribute(element, name), name);
     await this._prepareQuery();
+    if (this._page._live && typeof name === "string")
+      return this._liveRead((element, name) => __tsNs.tcLocatorAttribute(element, name), name);
     const n = this._node();
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }
   async _liveRead(fn, arg) {
+    return this._liveReadSource(fn.toString(), arg);
+  }
+  async _liveReadSource(source, arg) {
     await this._prepareQuery();
-    const index = await this._resolveLiveIdx();
-    if (index == null) return null;
-    // Pure DOM reads must not await unrelated exposed host callbacks.
+    if (this._page._session == null) return null;
+    // Resolve and read in one actor command. A timer or render between commands
+    // can otherwise change the locator index or remove the matched element.
     const result = await this._page._readEngineAsync(`
-      try { return {value: (${encodeEvaluationValue.toString()})(
-        (${fn.toString()})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
-      catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
+      try {
+        const matches = ${this._liveElementsExpression()};
+        if (${this._index == null} && matches.length > 1)
+          throw new Error('strict mode violation: locator resolved to ' + matches.length + ' elements');
+        const element = matches[0];
+        return {value: (${encodeEvaluationValue.toString()})(
+          element ? (${source})(element,${JSON.stringify(arg ?? null)}) : null)};
+      } catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
     `);
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }
-  async inputValue() {
-    await this._prepareQuery();
-    if (this._page._live) return (await this._liveRead((el) => el.value)) ?? "";
-    const n = this._node();
-    return n == null ? "" : native.inputValueOf(this._html, n);
+  async inputValue(options = {}) {
+    await this.waitFor({ state: "attached", timeout: options.timeout ?? 30000 });
+    return this._liveRead((element) => {
+      if (!["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)) {
+        throw new Error("Element is not an <input>, <textarea> or <select> element");
+      }
+      return element.value;
+    });
   }
   async isVisible() {
+    if (this._page._live) return !!(await this._liveRead(renderedVisibility));
     await this._prepareQuery();
     if (!this._page._live && this._node() == null) return false;
     await this._page._ensureLive();
@@ -1078,15 +1271,7 @@ class Locator {
   }
   async isChecked() {
     await this._prepareQuery();
-    return this._readElement((element) => {
-      if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
-        return element.checked;
-      const roles = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
-      if ((element.getAttribute("role") ?? "").split(/\s+/).some((role) => roles.includes(role))) {
-        return element.getAttribute("aria-checked") === "true";
-      }
-      throw new Error("Not a checkbox or radio button");
-    });
+    return this._readElement(checkedState);
   }
   async isEnabled() {
     await this._prepareQuery();
@@ -1222,8 +1407,8 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
-    await this._prepareQuery();
     if (
+      this._page._live &&
       this._selector &&
       !this._hasComposite() &&
       !this._parent &&
@@ -1238,7 +1423,7 @@ class Locator {
         this._index == null,
       );
     const index = await this._resolveLiveIdx();
-    if (index == null) throw new Error("turbo-surf: locator matched no elements");
+    if (index == null) throw new InteractionTargetMissing();
     return this._page._sessionDispatch("*", index, kind, value);
   }
   async _waitActionable(kind, options = {}) {
@@ -1247,16 +1432,16 @@ class Locator {
     if (options.force) return;
     const deadline = Date.now() + (options.timeout ?? 30000);
     do {
-      const live = this._page._live;
-      const state = live
-        ? await this._liveRead((element) => ({
-            enabled:
-              !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
-            editable: !element.readOnly,
-          }))
-        : this._snapshot();
-      const visible = live ? await this.isVisible() : state?.visible;
-      if (state?.enabled && (kind !== "fill" || state.editable) && visible) return;
+      if (this._page._live) {
+        // Resolve and check one live element in one actor command.
+        if (
+          await this._liveReadSource(clickOrFillReadySource, { kind, position: options.position })
+        )
+          return;
+      } else {
+        const state = this._snapshot();
+        if (state?.visible && state.enabled && (kind !== "fill" || state.editable)) return;
+      }
       if (Date.now() >= deadline) break;
       await this._page._redrain();
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1265,8 +1450,12 @@ class Locator {
       name: "TimeoutError",
     });
   }
+  async _waitVisibility() {
+    // Proof and geometry share one guest task, including effect/target identity.
+    // Unknown geometry is neither visible nor hidden; the caller owns its deadline.
+    return this._liveReadSource(waitingVisibilitySource);
+  }
   async fill(value, options = {}) {
-    await this._prepareQuery();
     await this._waitActionable("fill", options);
     const text = String(value);
     const match = this._singleMatch();
@@ -1299,19 +1488,23 @@ class Locator {
     await this._prepareQuery();
     return this.type(value);
   }
-  async check() {
-    await this._prepareQuery();
-    if (this._canDriveLive) return void (await this._driveLive("check"));
-    this._page._html = native.setCheckedNode(this._html, this._requireNode(), true);
+  async check(options) {
+    return this.setChecked(true, options);
   }
-  async uncheck() {
-    await this._prepareQuery();
-    if (this._canDriveLive) return void (await this._driveLive("uncheck"));
-    this._page._html = native.setCheckedNode(this._html, this._requireNode(), false);
+  async uncheck(options) {
+    return this.setChecked(false, options);
   }
-  async setChecked(on) {
+  async setChecked(on, options) {
     await this._prepareQuery();
-    return on ? this.check() : this.uncheck();
+    if (!this._canDriveLive) {
+      this._page._html = native.setCheckedNode(this._html, this._requireNode(), on);
+      return;
+    }
+    if ((await this.isChecked()) === on) return;
+    // ARIA controls publish their state through the real handler, often at the
+    // click's microtask checkpoint; never substitute an input-only property.
+    await this.click(options);
+    if ((await this.isChecked()) !== on) throw new Error("Click did not change checked state");
   }
   async selectOption(value, options = {}) {
     await this._prepareQuery();
@@ -1341,8 +1534,24 @@ class Locator {
       }
     } while (true);
   }
+  async _dispatchFirstClick(options, deadline) {
+    while (true) {
+      try {
+        return await this._driveLive("click", { ...options, clickCount: 1 });
+      } catch (error) {
+        if (!(error instanceof InteractionTargetMissing) || options.force || Date.now() >= deadline)
+          throw error;
+      }
+      // A render can detach the target between the readiness read and dispatch.
+      // Missing-target results are emitted before any pointer event is delivered.
+      await this._waitActionable("click", {
+        ...options,
+        timeout: Math.max(0, deadline - Date.now()),
+      });
+    }
+  }
   async click(opts = {}) {
-    await this._prepareQuery();
+    const deadline = Date.now() + (opts.timeout ?? 30000);
     await this._waitActionable("click", opts);
     const modifiers = opts.modifiers?.map((modifier) =>
       modifier === "ControlOrMeta"
@@ -1356,7 +1565,10 @@ class Locator {
       const urlBefore = this._page._url;
       let r;
       for (let count = 1; count <= (opts.clickCount ?? 1); count++)
-        r = await this._driveLive("click", { ...opts, clickCount: count });
+        r =
+          count === 1
+            ? await this._dispatchFirstClick(opts, deadline)
+            : await this._driveLive("click", { ...opts, clickCount: count });
       if (opts.button && opts.button !== "left") return;
       // A JS handler that navigated changed the URL (SPA router / form POST + redirect).
       // If the URL is unchanged AND the app didn't preventDefault, the click hit a plain
@@ -1433,8 +1645,10 @@ class Locator {
     await this._prepareQuery();
     if (!this._canDriveLive) return false;
     try {
-      const r = await this._driveLive("isfocused");
-      return r === "true";
+      return (
+        (await this._liveRead((element) => element.getRootNode().activeElement === element)) ===
+        true
+      );
     } catch {
       return false;
     }
@@ -1451,20 +1665,25 @@ class Locator {
     await this._prepareQuery();
     const state = opts.state ?? "visible";
     const timeout = opts.timeout ?? 5000;
-    const ok = () => {
+    const ok = async () => {
       const snap = this._snapshot();
       if (state === "attached") return snap != null;
       if (state === "detached") return snap == null;
-      if (state === "hidden") return snap == null || !snap.visible;
-      return snap != null && snap.visible; // 'visible'
+      if (snap == null) return state === "hidden";
+      const visible = await this._waitVisibility();
+      if (visible === undefined) return false;
+      return state === "hidden" ? !visible : visible;
     };
     if (!this._page._live) return undefined; // static page: best-effort, no polling surface
     const start = Date.now();
-    while (!ok() && Date.now() - start < timeout) {
+    let ready = await ok();
+    while (!ready && Date.now() - start < timeout) {
       await this._page._redrain();
       await this._prepareQuery();
+      if (Date.now() - start >= timeout) break;
+      ready = await ok();
     }
-    if (!ok()) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
+    if (!ready) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
     return undefined;
   }
 
@@ -1514,7 +1733,6 @@ class Locator {
   // dispatchEvent(type) — fire a named DOM event into the live app (e.g. a row
   // checkbox's 'click'). Static snapshot has no JS handlers, so it needs the isolate.
   async dispatchEvent(type, eventInit = {}) {
-    await this._prepareQuery();
     await this._page._ensureLive();
     if (this._page._live)
       return void (await this._driveLive("dispatch", { type: String(type), eventInit }));
@@ -1758,16 +1976,6 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   const pick = interactionTarget(selector, index, strict);
   if (kind === "type") return typingInteractionScript(pick, val, typingDriver(frameTyping));
   if (kind === "fill") return fillInteractionScript(pick, val);
-  if (kind === "check" || kind === "uncheck") {
-    const on = kind === "check";
-    return `(() => { ${pick} else {
-      if (el.checked !== ${on}) {
-        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        if (el.checked !== ${on}) throw new Error("Click did not change checked state");
-      }
-      globalThis.__RESULT = "OK";
-    } })();`;
-  }
   if (kind === "select") {
     return `(() => { ${pick} else {
       globalThis.__RESULT = JSON.stringify((${selectOptionOperation.toString()})(el, ${val}, false));
@@ -1810,14 +2018,9 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       ];
       const className = constructors.find(([pattern]) => pattern.test(type))?.[1] || "Event";
       const EventClass = globalThis[className];
-      const box = el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
-      if (type === "click" && box) el.checked = el.type === "radio" ? true : !el.checked;
+      // Native MouseEvent activation owns checked state, cancellation and events.
       const ev = new EventClass(type, { bubbles: true, cancelable: true, composed: true, view: globalThis, ...eventInit });
       t.dispatchEvent(ev);
-      if (type === "click" && box) {
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       globalThis.__RESULT = "OK";
     } })();`;
   }
@@ -1871,13 +2074,15 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   }
   // click
   return `(() => { ${pick} else {
-    // A real click lands on the deepest element under the cursor and bubbles up;
-    // dispatch there so handlers bound to inner nodes (e.g. a MUI Select's inner
-    // role="combobox", which opens on its own mousedown) actually fire. Focus and
-    // the default-action (form submit) logic stay on the matched control \`el\`.
-    let tgt = el; while (tgt.firstElementChild) tgt = tgt.firstElementChild;
+    const { rect, clip } = (${scrollClickTarget.toString()})(el);
+    // Only ambiguous descendant branches need a document-wide hit test: a leaf
+    // or single chain must not depend on unrelated animated sibling geometry.
+    let tgt = el, branched = false;
+    while (tgt.firstElementChild) {
+      branched ||= tgt.childElementCount > 1;
+      tgt = tgt.firstElementChild;
+    }
     const options = ${val} || {};
-    const rect = el.getBoundingClientRect();
     const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
     const button = options.button === "right" ? 2 : options.button === "middle" ? 1 : 0;
     const modifiers = options.modifiers || [];
@@ -1886,6 +2091,17 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
       ctrlKey: modifiers.includes("Control"),
       altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
+    if (o.clientX < clip.left || o.clientY < clip.top || o.clientX >= clip.right || o.clientY >= clip.bottom)
+      throw new Error("Click position is outside the visible scrollport after scrolling");
+    if (branched || options.position) {
+      const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
+      if (hit && el.contains(hit)) tgt = hit;
+    } else {
+      // Transparent ripple descendants can disappear on pointerdown. Dispatch
+      // to their eligible ancestor before starting the one real event sequence.
+      while (tgt !== el && getComputedStyle(tgt).pointerEvents === "none")
+        tgt = __tsNs.tcLocatorParent(tgt) ?? el;
+    }
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
     // options preventDefault mousedown to keep input focus — without the pointer pair the
@@ -2226,6 +2442,7 @@ class Frame {
         ? await this._typeWithCanonicalSelection(script)
         : await this._sessionEval(script, {
             waitForNavigation: kind === "click" && !value?.noWaitAfter,
+            waitForBindings: kind !== "click" || !this._parentPage._routes?.length,
           });
     if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
     return result;
@@ -2455,7 +2672,11 @@ class Page {
     const names = [...(this._bindings?.keys() ?? [])];
     if (this._routeHandlers?.size) names.push(this._routeBindingName);
     return (
-      buildExposeInitScript(names, this._routeBindingName) + "\n" + (this._routeInitScript ?? "")
+      clickScrollBootstrap +
+      "\n" +
+      buildExposeInitScript(names, this._routeBindingName) +
+      "\n" +
+      (this._routeInitScript ?? "")
     );
   }
 
@@ -2474,6 +2695,8 @@ class Page {
 
   _engineInitScriptSource() {
     return (
+      clickScrollBootstrap +
+      "\n" +
       buildExposeInitScript([...this._mergedBindings().keys()], this._routeBindingName) +
       "\n" +
       (this._routeInitScript ?? "")
@@ -2587,7 +2810,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       fetchResponse,
       signal,
     );
-    this._publishHostRouteFulfillment(source, data, decision, signal, session);
+    this._publishHostRouteResult(source, data, decision, signal, session);
     return decision;
   }
 
@@ -2607,13 +2830,20 @@ return String(globalThis.__RESULT ?? ""); })()`,
       };
     return data;
   }
-  _publishHostRouteFulfillment(source, data, decision, signal, session) {
-    if (decision.fulfilled && !signal.aborted && session === this._session && !this._closed) {
+  _publishHostRouteResult(source, data, decision, signal, session) {
+    const aborted = decision.action === "abort";
+    if (
+      (decision.fulfilled || aborted) &&
+      !signal.aborted &&
+      session === this._session &&
+      !this._closed
+    ) {
       const value = decision.fulfilled;
-      const status = value.status ?? 200;
-      const body = [204, 205, 304].includes(status)
-        ? Buffer.alloc(0)
-        : Buffer.from(value.bodyBytes ?? []);
+      const status = aborted ? 0 : (value.status ?? 200);
+      const body =
+        aborted || [204, 205, 304].includes(status)
+          ? Buffer.alloc(0)
+          : Buffer.from(value.bodyBytes ?? []);
       native.liveNetworkLogPublishIntercepted(
         session,
         JSON.stringify({
@@ -2622,7 +2852,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
           status,
           statusText: "",
           ok: status >= 200 && status < 300,
-          headers: Object.entries(value.headers ?? {}),
+          headers: Object.entries(value?.headers ?? {}),
+          ...(aborted
+            ? { error: "net::ERR_" + (decision.errorCode || "ABORTED").toUpperCase() }
+            : {}),
           request: data.request,
           context: {
             resourceType: data.request.resourceType,
@@ -3052,7 +3285,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
   // over `this._html`) and a subsequent navigation see the post-interaction state.
   async _refreshHistory(collectScript) {
-    if (syncNativeHistory(this, native)) return { url: this._url };
+    if (await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline()))
+      return { url: this._url };
     try {
       const encoded = await collectScript(
         this._session,
@@ -3067,11 +3301,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  async _refreshRequestContext(collectScript, historyNavigation) {
+  async _refreshRequestContext(collectScript, historyNavigation, nativeHistory) {
     try {
       const href = await collectScript(
         this._session,
-        "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
+        nativeHistory
+          ? "try { globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || ''; } finally { __tsNs.rscNav = ''; }"
+          : "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
       if (!href) return;
       const current = JSON.parse(href);
@@ -3090,6 +3326,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
+      // Native targets already own client history; a transport hint is not navigation.
+      if (hasNativeHistory(this)) return false;
       if (!nav || pathOf(nav) === this._loadedPath) return false;
       const target = this._resolveUrl(nav);
       if (target === historyNavigation?.url) return false;
@@ -3119,8 +3357,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const previousUrl = this._url;
     const historyNavigation = await this._refreshHistory(collectScript);
     this._html = native.liveSerialize(this._session);
-    await this._refreshRequestContext(collectScript, historyNavigation);
-    const rscNavigation = await this._refreshRscNavigation(collectScript, historyNavigation);
+    // Native history ignores transport hints. Clear them with the request
+    // context read instead of scheduling a second metadata command.
+    const nativeHistory = hasNativeHistory(this);
+    await this._refreshRequestContext(collectScript, historyNavigation, nativeHistory);
+    const rscNavigation =
+      !nativeHistory && (await this._refreshRscNavigation(collectScript, historyNavigation));
     try {
       this._cookies = native.liveCookies(this._session);
     } catch {
@@ -3165,12 +3407,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async _redrain() {
     if (this._session == null) return;
     try {
-      await this._collectSession(this._session, "globalThis.__RESULT = '';");
+      // Observe reached state without joining unrelated document IO between assertions.
+      await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
     } catch (error) {
+      const message = String(error?.message ?? error);
       if (
-        String(error?.message ?? error).includes(
-          "Execution interrupted by the session execution budget",
-        )
+        message.includes("Execution interrupted by the session execution budget") ||
+        message === "Driver collection exceeded the session execution budget"
       ) {
         try {
           this._html = native.liveSerialize(this._session);
@@ -3183,9 +3426,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
         }
         throw error;
       }
+      if (message !== "Driver collection exceeded its aggregate drain budget") throw error;
       /* Aggregate drain expiry can still expose reached state. */
     }
-    await this._refreshFromSession();
+    await this._refreshFromSession(true);
     await this._drainBindings();
   }
 
@@ -3344,8 +3588,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
+  _retainNavigationResponse(entry, response) {
+    if (entry.id != null && entry.context?.navigation && entry.context.frame?.path?.length === 0) {
+      const session = this._session ?? this._openingNetworkId;
+      for (const owner of this._navigationResponseOwners ?? []) {
+        if (owner.session === session) owner.responses.set(String(entry.id), response);
+      }
+    }
+  }
+
   _emitNetworkResponse(entry, previousHop) {
     const { response, lifecycle } = this._captureNetworkResponse(entry);
+    this._retainNavigationResponse(entry, response);
     if (
       entry.redirectHop > 0 &&
       previousHop &&
@@ -3547,9 +3801,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (kind !== "isfocused") this._actionSeq++;
     const dispatch =
       kind === "click" && !value?.noWaitAfter ? native.liveDispatchEngine : native.liveEvalEngine;
+    // A synthetic event only needs to finish dispatching here. The normal
+    // metadata refresh and binding drain below handle follow-up work.
     const r = await dispatch(
       this._session,
       interactionScript(selector, index ?? 0, kind, value, strict),
+      kind === "dispatch" ? true : undefined,
     );
     // Dispatch already waits for document commit; metadata must not wait for load.
     await this._refreshFromSession(true);
@@ -3557,7 +3814,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // rejection that happens to be in the queue can't shadow the original
     // locator failure. Drain is best-effort; a throwing binding writes to
     // console (same shape as _sessionEval → drain errors).
-    if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    if (r === "NO_MATCH") throw new InteractionTargetMissing();
+    // A route handler can be held by the caller until this click returns.
+    if (kind === "click" && this._routes?.length) {
+      scheduleBindingDrain(this);
+      return r;
+    }
     // Drain exposed-binding calls queued by handlers that ran during this
     // interaction so a subsequent assert sees them without waiting for the next
     // evaluate — matches `_sessionEval`'s contract.
@@ -3599,6 +3861,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return opener && !opener.isClosed() ? opener : null;
   }
 
+  _historyReadDeadline() {
+    let deadline = Infinity;
+    for (const owner of this._navigationResponseOwners ?? [])
+      if (owner.session === this._session)
+        deadline = Math.min(deadline, owner.deadline ?? Infinity);
+    return deadline;
+  }
+
   _nativeLoad() {
     return (this._nativeLoadState ??= new NativeLoadState(this));
   }
@@ -3608,11 +3878,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     closeScreenshotScene(this);
   }
 
-  _didNativeNavigate(event) {
+  async _didNativeNavigate(event) {
     if (retiredNativeHistoryTarget(this)) return;
     this._retireNativeDocumentAssets();
     this._nativeLoad().reset();
-    if (!syncNativeHistory(this, native))
+    if (!(await syncNativeHistoryAcknowledged(this, native)))
       throw new Error("Native navigation has no owned history target");
     this._loadedPath = pathOf(this._url);
     if (this._actorHub.canReadTarget(this._targetId)) {
@@ -3622,8 +3892,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     emitNativeFrameNavigation(this, event.url);
   }
 
-  _didNativeHistoryChanged(event) {
-    notifyNativeHistory(this, native, event);
+  async _didNativeHistoryChanged(event) {
+    return notifyNativeHistoryAcknowledged(this, native, event);
   }
 
   _navigationTimeoutFor(options) {
@@ -3722,6 +3992,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const session = this._session;
     const bindingDeadline = this._navigationBindingDeadline(opts);
     const { controller, milestone } = this._navigationMilestone(opts);
+    // Resource traffic may evict the bounded history before this command's load
+    // milestone. Retain only active owners' genuine main-document responses.
+    const responseOwner = { session, deadline: bindingDeadline, responses: new Map() };
+    (this._navigationResponseOwners ??= new Set()).add(responseOwner);
     this._driverNavigation = true;
     try {
       const receipt = JSON.parse(
@@ -3749,18 +4023,25 @@ return String(globalThis.__RESULT ?? ""); })()`,
           this._remainingTargetIdleTimeout(opts, navigationStarted),
         );
       if (opts.waitUntil !== "commit") this._html = native.liveSerialize(session);
-      syncNativeHistory(this, native);
+      await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline());
       if (receipt.sameDocument === true) return null;
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
-      const response = this._recentResponses?.findLast(
-        (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
-      );
+      const response = responseOwner.responses.get(String(receipt.requestId));
       if (!response)
         throw new Error("Native navigation completed without an owned navigation response");
       return response;
     } catch (error) {
+      if (error.message === "Native history acknowledgement wait timed out")
+        throw Object.assign(
+          new Error(`Target navigation timeout after ${this._navigationTimeoutFor(opts)}ms`, {
+            cause: error,
+          }),
+          { name: "TimeoutError" },
+        );
       throw this._targetNavigationError(error);
     } finally {
+      responseOwner.responses.clear();
+      this._navigationResponseOwners.delete(responseOwner);
       controller.abort(new Error("Navigation event wait ended"));
       this._driverNavigation = false;
     }
@@ -4031,7 +4312,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return resp;
   }
   async _traverseNativeHistory(direction, opts) {
-    syncNativeHistory(this, native);
+    await syncNativeHistoryAcknowledged(this, native, this._historyReadDeadline());
     const entry = direction === "back" ? this._history.at(-1) : this._fwd.at(-1);
     if (entry == null) return null;
     return this._navigateActorTarget(historyUrl(entry), undefined, undefined, {

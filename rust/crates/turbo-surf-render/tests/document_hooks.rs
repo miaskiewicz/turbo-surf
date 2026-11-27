@@ -88,12 +88,19 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
                 let request = String::from_utf8_lossy(&request);
                 let path = request.split_whitespace().nth(1).unwrap_or("/");
                 let path = path.split('?').next().unwrap();
+                // The parser requests this script only after installing the document's
+                // response policy. Sending HTML first alone cannot order commits.
+                if path == "/report.js" {
+                    if let Some(owner) = parser_document(&request) {
+                        served.0.lock().unwrap().insert(owner);
+                        served.1.notify_waiters();
+                    }
+                }
                 if let Some((_, ms)) = delays.iter().find(|(name, _)| path.ends_with(name)) {
                     tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
                 }
-                // Chrome's control committed the cross-origin children in document order,
-                // and an origin's agent-cluster keying follows its first committed document
-                // (turbo-surf#102): serve them in that order, whatever the host's load.
+                // Match the control's first-committed document, rather than relying on
+                // response writes also completing in the same order (turbo-surf#102).
                 let earlier = earlier_cross_children(&cases, path);
                 let wait = async {
                     loop {
@@ -107,7 +114,9 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
                         notified.await;
                     }
                 };
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), wait).await;
+                tokio::time::timeout(std::time::Duration::from_secs(5), wait)
+                    .await
+                    .expect("earlier cross-origin document did not commit");
                 let (status, fields, body) = respond(&cases, path, port);
                 let mut head = format!("HTTP/1.1 {status}\r\nCache-Control: no-store\r\n");
                 for (name, value) in fields {
@@ -119,12 +128,22 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
                 ));
                 let _ = socket.write_all(head.as_bytes()).await;
                 let _ = socket.write_all(body.as_bytes()).await;
-                served.0.lock().unwrap().insert(path.to_string());
-                served.1.notify_waiters();
+                if !body.contains("<script src='/report.js'>") {
+                    served.0.lock().unwrap().insert(path.to_string());
+                    served.1.notify_waiters();
+                }
             });
         }
     });
     port
+}
+
+fn parser_document(request: &str) -> Option<String> {
+    let referer = request.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("referer").then_some(value.trim())
+    })?;
+    Some(url::Url::parse(referer).ok()?.path().to_owned())
 }
 
 /// The `/<index>/<name>` paths of the case's cross-origin children before `path`'s, in

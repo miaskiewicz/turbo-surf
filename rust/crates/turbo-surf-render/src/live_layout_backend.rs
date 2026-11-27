@@ -56,10 +56,29 @@ impl CacheKey {
 }
 
 #[derive(PartialEq)]
+enum DocumentInputVersion {
+    Full(u64),
+    Connected(turbo_dom_browser_env::host_internals::DocumentCheckpoint),
+}
+
+fn document_input_version(
+    scope: &mut v8::PinScope<'_, '_>,
+    input: &crate::live_layout_dom::NativeLayoutInput<'_>,
+) -> DocumentInputVersion {
+    // The input retains an owner witness, which may be an Element rather than a Document.
+    let _owner = turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
+    let checkpoint = crate::live_layout_dom::current_document_checkpoint(scope);
+    checkpoint.map_or(
+        DocumentInputVersion::Full(input.tree.capture.tree_version),
+        DocumentInputVersion::Connected,
+    )
+}
+
+#[derive(PartialEq)]
 struct LayoutStateKey {
     realm: u64,
     document: u32,
-    version: u64,
+    version: DocumentInputVersion,
     width: u32,
     height: u32,
     layout_scale: u32,
@@ -526,8 +545,9 @@ pub(crate) fn op_live_element_geometry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     visual_rect: bool,
+    rect_only: bool,
 ) -> Result<Geometry, JsErrorBox> {
-    measure(scope, receiver, visual_rect).map_err(|error| {
+    measure(scope, receiver, visual_rect, rect_only).map_err(|error| {
         if error == "Illegal invocation" {
             JsErrorBox::type_error(error)
         } else {
@@ -542,32 +562,44 @@ fn zero_scroll_offsets(context: v8::Local<v8::Context>) -> bool {
         .values()
         .all(|offset| *offset == [0.0; 2])
 }
-fn resource_query_allowed(
+fn current_resource_query(
     input: &crate::live_layout_dom::NativeLayoutInput<'_>,
-    query: Query,
-) -> bool {
-    input.owner_context.is_some_and(zero_scroll_offsets)
-        && !(query.kind == QueryKind::ScrollExtent
-            && input.tree.capture.quirks
-            && input.tree.capture.body
-                == Some(crate::live_layout::source_id(
-                    input.tree.document_id(),
-                    query.source,
-                )))
+    mut query: Query,
+) -> Option<Query> {
+    query.retained_scroll = !zero_scroll_offsets(input.owner_context?);
+    (!(query.kind == QueryKind::ScrollExtent
+        && input.tree.capture.quirks
+        && input.tree.capture.body
+            == Some(crate::live_layout::source_id(
+                input.tree.document_id(),
+                query.source,
+            ))))
+    .then_some(query)
 }
 fn set_resource_query(input: &mut crate::live_layout_dom::NativeLayoutInput<'_>, kind: QueryKind) {
     let query = Query {
         source: input.handle,
         kind,
+        retained_scroll: false,
     };
-    input.tree.resource_query = resource_query_allowed(input, query).then_some(query);
+    input.tree.resource_query = current_resource_query(input, query);
 }
 
 fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     visual_rect: bool,
+    rect_only: bool,
 ) -> Result<Geometry, String> {
+    // The cache proof covers rectangles; client/offset metrics keep their normal capture.
+    if rect_only
+        && turbo_dom_browser_env::host_internals::cached_own_box(scope, receiver)
+            == turbo_dom_browser_env::host_internals::CachedOwnBox::DisplayNone
+    {
+        return Ok(geometry_value(
+            turbo_dom_layout::cssom_view::metrics::empty_geometry(),
+        ));
+    }
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     if visual_rect {
         set_resource_query(&mut input, QueryKind::LocalBox);
@@ -604,13 +636,16 @@ fn measure<'s>(
         }
         geometry
     };
+    Ok(geometry_value(geometry))
+}
+fn geometry_value(geometry: turbo_dom_layout::cssom_view::metrics::ElementGeometry) -> Geometry {
     let rect = |r: turbo_dom_layout::layout_snapshot::Rect| [r.x, r.y, r.width, r.height];
-    Ok(Geometry {
+    Geometry {
         bounds: rect(geometry.bounds),
         rects: geometry.rects.into_iter().map(rect).collect(),
         client: geometry.client,
         offset: geometry.offset,
-    })
+    }
 }
 /// Offset and client metrics report an element's own unzoomed CSS pixels: the
 /// pixel-snapped layout value divided by its effective zoom, then rounded.
@@ -771,13 +806,11 @@ fn resolve_layout_once<'s>(
     lifecycle_request: &mut Option<crate::live_layout_resources::AnimationNeedsLifecycle>,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
     refresh(scope, input)?;
-    if input
+    let query = input
         .tree
         .resource_query
-        .is_some_and(|query| !resource_query_allowed(input, query))
-    {
-        input.tree.resource_query = None;
-    }
+        .and_then(|query| current_resource_query(input, query));
+    input.tree.resource_query = query;
     let input = &*input;
     let (tree, sheets) = (&input.tree, input.sheets.as_slice());
     let key_timer =
@@ -798,7 +831,9 @@ fn resolve_layout_once<'s>(
         state: LayoutStateKey {
             realm: viewport.realm,
             document: tree.document_id(),
-            version: tree.capture.tree_version,
+            // This is solved-geometry equivalence only. Fresh live layout below
+            // still verifies the capture's original, full native storage version.
+            version: document_input_version(scope, input),
             width: viewport.width.to_bits(),
             height: viewport.height.to_bits(),
             layout_scale: viewport.layout_scale.to_bits(),

@@ -51,6 +51,7 @@ httpdate = "1"
 tokio = { version = "1", features = [
     "macros",
     "rt",
+    "rt-multi-thread",
     "time",
     "sync",
     "process",

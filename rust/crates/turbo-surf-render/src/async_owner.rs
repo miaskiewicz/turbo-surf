@@ -11,7 +11,7 @@ mod drain;
 mod owners;
 #[path = "async_owner/work.rs"]
 mod work;
-pub(super) use drain::{drain, quiescence_turn, QuiescenceTurn};
+pub(super) use drain::{action_quiescence_turn, drain, quiescence_turn, QuiescenceTurn};
 
 use bridge::OwnerAsyncContext;
 use owners::{LeaseState, WeakOwners};
@@ -330,12 +330,6 @@ pub(super) fn with_retained_stream<'s, T>(
         .map_err(|_| "Owner entry failed".to_owned())
 }
 
-#[derive(Clone, Copy)]
-enum ReactionSelection {
-    Strict,
-    AwaitCompletion,
-}
-
 struct SelectedContexts {
     contexts: Vec<v8::Global<v8::Context>>,
     pending_ops: usize,
@@ -347,7 +341,6 @@ fn selected_contexts<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &mut State,
     roots: &[v8::Global<v8::Context>],
-    reactions: ReactionSelection,
 ) -> Result<SelectedContexts, String> {
     if let Some(error) = &state.failure {
         return Err(error.clone());
@@ -367,11 +360,12 @@ fn selected_contexts<'s>(
     if let Some(error) = snapshot.tracking_error {
         return Err(error.into());
     }
+    // Collection loses parent state, not its authenticated root identity. Keep
+    // those reactions blocked without poisoning unrelated tasks; an explicit
+    // completion drain still rejects when no genuine progress is available.
     if snapshot.inconsistent_owners
         || snapshot.unknown_ops != 0
-        || (snapshot.unknown_reaction_parents != 0
-            && (matches!(reactions, ReactionSelection::Strict)
-                || snapshot.unknown_reaction_parents != snapshot.collected_root_reaction_parents))
+        || snapshot.unknown_reaction_parents != snapshot.collected_root_reaction_parents
     {
         return Err("Native async work has unclassified ownership".into());
     }
@@ -400,18 +394,14 @@ fn selected_contexts<'s>(
 }
 
 pub(super) fn selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, String> {
-    select_work(rt, target, ReactionSelection::Strict)
+    select_work(rt, target)
 }
 
 pub(super) fn completion_selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, String> {
-    select_work(rt, target, ReactionSelection::AwaitCompletion)
+    select_work(rt, target)
 }
 
-fn select_work(
-    rt: &mut JsRuntime,
-    target: u64,
-    reactions: ReactionSelection,
-) -> Result<Selection, String> {
+fn select_work(rt: &mut JsRuntime, target: u64) -> Result<Selection, String> {
     let roots = auxiliary_task_contexts(rt, Some(target))?;
     let (contexts, pending_ops, runnable, modules, blocked_reactions) = {
         deno_core::scope!(scope, rt);
@@ -421,7 +411,7 @@ fn select_work(
             pending_ops,
             runnable,
             blocked_reactions,
-        } = selected_contexts(scope, &mut shared.borrow_mut(), &roots, reactions)?;
+        } = selected_contexts(scope, &mut shared.borrow_mut(), &roots)?;
         let mut modules = false;
         for context in &contexts {
             let context = v8::Local::new(scope, context);

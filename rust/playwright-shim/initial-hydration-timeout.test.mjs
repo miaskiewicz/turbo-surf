@@ -352,3 +352,27 @@ test("aggregate drain expiry still refreshes state from the actual live document
     await context.close();
   }
 });
+
+for (const message of [
+  "Native async work has unclassified ownership",
+  "Driver collection exceeded the session execution budget",
+  "native transport unavailable",
+]) {
+  test(`assertion draining preserves ${message}`, async () => {
+    const { BrowserContext } = await import("./index.mjs");
+    const context = new BrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.setContent("<!doctype html><p>Reached state</p>");
+      const failure = new Error(message);
+      const collect = page._collectSession;
+      page._collectSession = function () {
+        this._collectSession = collect;
+        return Promise.reject(failure);
+      };
+      await assert.rejects(page._redrain(), (error) => error === failure);
+    } finally {
+      await context.close();
+    }
+  });
+}

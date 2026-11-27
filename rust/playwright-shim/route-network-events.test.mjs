@@ -47,6 +47,58 @@ function responseWait(page, url) {
   );
 }
 
+for (const transport of ["fetch", "xhr"]) {
+  test(`aborted ${transport} routes publish one failed request without a response`, async () =>
+    fixture(async (page, origin, wire) => {
+      const seen = observe(page);
+      let calls = 0;
+      await page.route("**/api/aborted", async (route) => {
+        calls++;
+        await route.abort("failed");
+      });
+      const wait = page.waitForRequest(origin + "/api/aborted", { timeout: 1500 }).then(
+        (request) => ({ request }),
+        (error) => ({ error }),
+      );
+      const result = await page.evaluate(async (kind) => {
+        if (kind === "fetch") {
+          try {
+            await fetch("/api/aborted", { method: "POST", body: "payload" });
+            return "unexpected success";
+          } catch {
+            return "error";
+          }
+        }
+        return new Promise((resolve) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/aborted");
+          xhr.onerror = () => resolve("error");
+          xhr.onload = () => resolve("unexpected success");
+          xhr.send("payload");
+        });
+      }, transport);
+      assert.equal(result, "error");
+      const observed = await wait;
+      assert.ifError(observed.error);
+      assert.equal(calls, 1);
+      assert.equal(seen.request.length, 1);
+      assert.equal(seen.requestfailed.length, 1);
+      assert.equal(seen.response.length, 0);
+      assert.equal(seen.requestfinished.length, 0);
+      assert.equal(observed.request, seen.request[0]);
+      assert.equal(observed.request, seen.requestfailed[0]);
+      assert.equal(observed.request.method(), "POST");
+      assert.equal(observed.request.postData(), "payload");
+      assert.deepEqual(observed.request.failure(), { errorText: "net::ERR_FAILED" });
+      assert.equal(await observed.request.response(), null);
+      assert.equal(observed.request.frame(), page.mainFrame());
+      assert.deepEqual(
+        wire.filter((url) => url.startsWith("/api/")),
+        [],
+      );
+    }));
+}
+
 test("fulfilled routes publish the actual response and one coherent request lifecycle", async () =>
   fixture(async (page, origin, wire) => {
     const seen = observe(page);

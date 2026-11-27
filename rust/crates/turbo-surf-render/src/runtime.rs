@@ -3175,6 +3175,25 @@ impl FetchResponseTrace {
         self.last.lock().unwrap().as_ref().map(|(id, _)| *id)
     }
 }
+// Dropping an in-flight op also drops its transport future. Its observed headers
+// still need a terminal record even though the async cancellation branch cannot run.
+struct FetchResponseCancellation<'a> {
+    log: &'a NetworkLog,
+    trace: Option<&'a FetchResponseTrace>,
+}
+impl FetchResponseCancellation<'_> {
+    fn complete(&mut self) {
+        self.trace = None;
+    }
+}
+impl Drop for FetchResponseCancellation<'_> {
+    fn drop(&mut self) {
+        if let Some(trace) = self.trace {
+            append_cancelled_response_trace(self.log, trace);
+        }
+    }
+}
+
 fn append_response_trace(
     log: &mut NetworkLog,
     mut entry: serde_json::Value,
@@ -4068,6 +4087,10 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         ..Default::default()
     };
     let event_log = state.borrow().borrow::<NetworkLog>().clone();
+    let mut response_cancellation = FetchResponseCancellation {
+        log: &event_log,
+        trace: Some(&response_trace),
+    };
     let observer = |hop| response_trace.observe(&event_log, &event_context, hop);
     let mut opts = FetchOptions {
         response_observer: Some(&observer),
@@ -4100,7 +4123,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         ..Default::default()
     };
     if is_streaming_fetch(destination, integrity, &init) {
-        return run_stream_fetch_branch(
+        let out = run_stream_fetch_branch(
             &target,
             source,
             &context,
@@ -4118,6 +4141,8 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             &response_trace,
         )
         .await;
+        response_cancellation.complete();
+        return out;
     }
     let mut script_errors_muted = false;
     let request_metadata = FetchRequestMetadata::from_options(&opts);
@@ -4174,6 +4199,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         jar_rc.borrow_mut().merge_request_changes(local);
         fetch_streams::release(&mut state.borrow_mut(), cancel_id);
         append_cancelled_response_trace(&event_log, &response_trace);
+        response_cancellation.complete();
         return FetchOut {
             aborted: true,
             final_url: target,
@@ -4210,6 +4236,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     append_response_trace(log, entry, &response_trace);
+    response_cancellation.complete();
     out
 }
 
@@ -11711,7 +11738,7 @@ const __formDataValue=(value,filename,hasFilename)=>{
 if (typeof globalThis.FormData === "undefined") {
   globalThis.FormData = class FormData {
     constructor(form=undefined,submitter=undefined) {
-      const rows=ops.op_form_data_entries(form,submitter);
+      const rows=ops.op_form_data_entries(form,submitter,__document);
       try {
         const record=__makeFormDataRecord(rows);__formDataStates.set(this,record);
         if(form!==undefined&&!ops.op_form_data_event(form,__aliasFormData(record)))throw new __formDataTypeError("Native formdata event dispatch failed");
@@ -13251,17 +13278,20 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
 // from the document's mutation consumer below (a src/srcset record on any <img> this
 // document owns, connected or not, and images inserted into its trees), and from
 // loadDocumentResources for parser images, so no image carries own properties.
-__G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
+__G.loadDocumentResources = function(doc = __document, win = globalThis, before = null, onlyStyle = null) {
   if(doc!==__document || __intrinsicApply(__documentType,doc,[])!==9)throw new TypeError("Resource loading requires the owning native Document");
-  __discoverDictionaries();
+  if(!onlyStyle)__discoverDictionaries();
   const styles=__list();
   // The query is already in document order. Avoid a whole-tree position walk
   // for each parser resource, unless a resource hook changed that order.
   const epoch=__resourceMutationEpoch;
-  const selected=__resourceListApply(__resourceDocumentQuery,doc,[before?"link,img,style,script":"link,img,style"]);
-  const length=__resourceListApply(__resourceListLength,selected,[]);
-  const elements={__proto__:null,length};
-  for(let index=0;index<length;index++)elements[index]=__resourceListApply(__resourceListItem,selected,[index]);
+  const elements={__proto__:null,length:0};
+  if(onlyStyle){elements[0]=onlyStyle;elements.length=1;}
+  else{
+    const selected=__resourceListApply(__resourceDocumentQuery,doc,[before?"link,img,style,script":"link,img,style"]);
+    elements.length=__resourceListApply(__resourceListLength,selected,[]);
+    for(let index=0;index<elements.length;index++)elements[index]=__resourceListApply(__resourceListItem,selected,[index]);
+  }
   const cutoff=before?__resourceIndexOf(elements,before):-1;
   for (let index=0;index<elements.length;index++) {
     const el=elements[index];
@@ -13642,6 +13672,23 @@ function __imageMutation(event) {
     if (event.added.length || event.removed.length) __reselectPicture(event.target);
   }
 }
+// Emotion inserts and edits many independent inline sheets during a commit.
+// Reload that sheet alone; unusual resource-containing style subtrees keep the
+// full scan so their nested links, images and dictionary admissions are preserved.
+function __singleMutatedStyle(event) {
+  let style=null;
+  if(__resourceElementKind(event.target)==="STYLE")style=event.target;
+  else if(event.type==="childList" && event.added.length===1 &&
+    __resourceElementKind(event.added[0])==="STYLE")style=event.added[0];
+  for(let index=0;index<event.ancestors.length;index++){
+    const ancestor=event.ancestors[index];
+    if(__resourceElementKind(ancestor)!=="STYLE")continue;
+    if(style && style!==ancestor)return null;
+    style=ancestor;
+  }
+  if(!style || __resourceApply(__resourceElementQuery,style,["link,img,style"])!==null)return null;
+  return style;
+}
 function __resourceMutation(event) {
   if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
   __imageMutation(event);
@@ -13664,7 +13711,7 @@ function __resourceMutation(event) {
   // Native IO can resume after a hydration round has ended. Admit newly
   // connected resources at their mutation; ordinary text/attribute edits do
   // not trigger a whole-document resource scan.
-  if (relevant) __loadMutatedResources();
+  if (relevant) __loadMutatedResources(__document,globalThis,null,__singleMutatedStyle(event));
 }
 ops.op_install_resource_consumer(__document, event => {
   __resourceMutationEpoch++;
@@ -14028,7 +14075,8 @@ __G.tcApplyHover = function (el) {
     for (let i = 0; i < styles.length; i++) cssTexts.push(styles[i].textContent || "");
   } catch (e) {}
   try {
-    const sheets = document.styleSheets || [];
+    // Indexing the public live list refreshes all sheets on every access.
+    const sheets = __cssHost(document).readSheets();
     for (let si = 0; si < sheets.length; si++) {
       let rules;
       try {

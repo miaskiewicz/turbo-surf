@@ -649,3 +649,96 @@ impl Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn incomplete_handshake_cannot_keep_buffering_past_the_head_limit() {
+        let (mut peer, client) = tokio::io::duplex(MAX_RESPONSE_HEAD + 1);
+        peer.write_all(&vec![b'x'; MAX_RESPONSE_HEAD + 1])
+            .await
+            .unwrap();
+        let mut client: Box<dyn Io> = Box::new(client);
+        assert_eq!(
+            read_head(&mut client).await,
+            Err(ProtocolError("response head too large"))
+        );
+    }
+
+    #[test]
+    fn unsolicited_pong_is_not_delivered_as_a_message_or_answered() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (loopback, mut replies) = tokio::sync::mpsc::unbounded_channel();
+        let session = Session {
+            network: Default::default(),
+            events,
+            loopback,
+            closing: Default::default(),
+            close_sent: Default::default(),
+        };
+        session.deliver(Inbound::Pong);
+        assert!(matches!(
+            received.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            replies.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    fn writer(closing: bool, events: UnboundedSender<WsEvent>) -> Writer {
+        Writer {
+            network: Default::default(),
+            deflater: None,
+            events,
+            closing: Arc::new(AtomicBool::new(closing)),
+            close_sent: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn writer_drops_queued_data_after_close_starts() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (send, outbound) = tokio::sync::mpsc::unbounded_channel();
+        let (mut peer, client) = tokio::io::duplex(128);
+        assert!(send
+            .send(Outbound::Message(frame::TEXT, b"discard".to_vec()))
+            .is_ok());
+        drop(send);
+        writer(true, events).run(client, outbound).await;
+        let mut bytes = Vec::new();
+        peer.read_to_end(&mut bytes).await.unwrap();
+        assert!(bytes.is_empty());
+        assert_eq!(received.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn failed_write_waits_for_the_read_side_to_report_close() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (send, outbound) = tokio::sync::mpsc::unbounded_channel();
+        let (peer, client) = tokio::io::duplex(128);
+        drop(peer);
+        assert!(send
+            .send(Outbound::Message(frame::TEXT, b"pending".to_vec()))
+            .is_ok());
+        drop(send);
+        let task = writer(false, events).run(client, outbound);
+        tokio::pin!(task);
+        // No I/O can make progress: the peer and outbound sender are closed.
+        // A writer that incorrectly finishes here returns Ready on this poll.
+        assert!(
+            std::future::poll_fn(|cx| {
+                use std::future::Future;
+                std::task::Poll::Ready(task.as_mut().poll(cx).is_pending())
+            })
+            .await
+        );
+        assert!(matches!(
+            received.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+}

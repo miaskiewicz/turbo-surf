@@ -33,7 +33,8 @@ pub use session::{
     live_network_log_acknowledge, live_network_log_create, live_network_log_discard_handles,
     live_network_log_publish_intercepted, live_network_log_wait, live_network_log_wake, live_open,
     live_read_engine, live_read_engine_async, live_resize, live_serialize, live_set_content,
-    live_set_cookies, live_target_configure, live_target_history_state, live_target_network_state,
+    live_set_cookies, live_target_configure, live_target_history_state,
+    live_target_history_state_async, live_target_network_state,
 };
 
 use napi::bindgen_prelude::*;

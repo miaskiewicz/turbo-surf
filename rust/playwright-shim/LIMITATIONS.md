@@ -16,7 +16,7 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
-This describes the v0.8.6 source. Release verification is documented in
+This describes the v0.8.7 release candidate. Release verification is documented in
 [PUBLISHING.md](../../PUBLISHING.md). The default renderer is Rust/V8;
 Chrome/Playwright are development oracles. An explicitly selected browser solver is
 a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).
@@ -218,7 +218,7 @@ for lifetime, inheritance and surface contracts; the enabled-mode limits above r
 | `textContent`, `innerText`, `innerHTML`, `allTextContents`, `allInnerTexts` | ✅ | |
 | `getAttribute`, `inputValue`, `selectedValues`, `cssValue`, `ariaRole`, `accessibleName`, `accessibleDescription` | ✅ | |
 | `is*` (`Visible/Hidden/Checked/Enabled/Disabled/Editable/Empty`) | ✅ | |
-| `fill`, `clear`, `type`, `pressSequentially`, `check`, `uncheck`, `setChecked`, `selectOption`, `click`, `dblclick`, `tap`, `press` | ✅ | DOM-level (same intent model as Page). |
+| `fill`, `clear`, `type`, `pressSequentially`, `check`, `uncheck`, `setChecked`, `selectOption`, `click`, `dblclick`, `tap`, `press` | ✅ | DOM-level (same intent model as Page). A live click retries a missing target before the first dispatch within its action deadline. |
 | `evaluate`, `evaluateAll` | ✅ | Resolve the indexed live match or full matched collection in the owning page realm; page effects persist. |
 | `ariaSnapshot` | ✅ | |
 | `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |

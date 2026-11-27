@@ -436,6 +436,7 @@ fn snapshot_pass(
                 input.resource_query,
                 &input.completed_animations,
                 input.lifecycle_observed,
+                Some(tree),
             )? {
                 crate::live_layout_resources::Admission::Accepted(strict) => strict,
                 crate::live_layout_resources::Admission::NeedsLifecycle(request) => {

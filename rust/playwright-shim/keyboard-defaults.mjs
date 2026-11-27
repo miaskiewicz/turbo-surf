@@ -91,7 +91,7 @@ function isSelectAllShortcut(options) {
     (options.ctrlKey || options.metaKey) && options.key.toLowerCase() === "a" && !options.altKey
   );
 }
-function applyKeyboardDefault(
+export function applyKeyboardDefault(
   element,
   options,
   phase,

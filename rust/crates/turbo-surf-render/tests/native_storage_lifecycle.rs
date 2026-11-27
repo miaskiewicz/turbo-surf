@@ -110,3 +110,35 @@ async fn native_collection_and_teardown_belong_only_to_their_actual_session() {
         json!(["https://second.test/", true, 53]).to_string()
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn repeated_collection_can_keep_unchanged_native_storage() {
+    let mut page = PageSession::open(
+        "<body><p>retained</p>",
+        "https://storage.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    for attempt in 0..2 {
+        page.collect_message_port_garbage_for_testing();
+        assert_eq!(
+            page.eval_json_expression("document.querySelector('p').textContent")
+                .await
+                .unwrap(),
+            json!("retained").to_string()
+        );
+        let diagnostics = page.native_storage_diagnostics_for_testing();
+        let documents = diagnostics["last"]["documents"].as_array().unwrap();
+        assert!(!documents.is_empty(), "{diagnostics}");
+        assert_eq!(diagnostics["rejected"], 0, "{diagnostics}");
+        if attempt == 1 {
+            assert!(
+                documents.iter().all(|row| row["rewrote"] == false),
+                "{diagnostics}"
+            );
+        }
+    }
+}

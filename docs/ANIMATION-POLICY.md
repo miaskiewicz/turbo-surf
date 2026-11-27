@@ -85,3 +85,14 @@ This is a distinct proof from naturally completed, non-filling animations in the
 normal enabled mode. Enabled-mode name agreement and all existing font, transform,
 resource and ownership checks remain in place. Missing or failed policy proof
 retains the original animation guard, and lifecycle-waived layouts are not cached.
+
+## Locator readiness
+
+With presentation enabled, locator visibility waits first read native geometry.
+If geometry rejects an active animation, the wait can remain pending only when
+one coherent observation proves a relevant finite, running, positive-rate effect
+that will finish without filling. It retries within the original caller deadline.
+Paused, infinite or filling effects retain the unsupported-capability error, as
+do unrelated geometry failures. Direct visibility reads retain their existing
+error behavior. Readiness does not cancel effects, change styles or retry input
+events.

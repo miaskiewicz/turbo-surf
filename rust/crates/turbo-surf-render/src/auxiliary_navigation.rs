@@ -16,6 +16,7 @@ pub(super) struct SourceSnapshot {
     policy: crate::csp::Policy,
     referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     user_activation: bool,
+    pub(super) self_hyperlink: bool,
     request: RequestPlan,
 }
 impl SourceSnapshot {
@@ -48,6 +49,7 @@ impl SourceSnapshot {
             policy: policy.active.clone(),
             referrer_policy: policy.referrer_policy,
             user_activation: host_user_activation(source),
+            self_hyperlink: false,
             request: RequestPlan::default(),
         })
     }
@@ -328,22 +330,28 @@ pub(super) fn pending(state: &OpState) -> bool {
 }
 
 pub(super) fn cancel(state: &mut OpState, target: u64) {
+    cancel_with_error(state, target, "Navigation target closed or superseded");
+}
+
+pub(super) fn supersede(state: &mut OpState, target: u64) {
+    cancel_with_error(
+        state,
+        target,
+        "Navigation interrupted by another navigation",
+    );
+}
+
+fn cancel_with_error(state: &mut OpState, target: u64, error: &str) {
     let state = self::state(state);
     state.action_commits.remove(&target);
     if let Some(job) = state.jobs.remove(&target) {
         if state.waiters.contains(&job.generation) {
-            state.results.insert(
-                job.generation,
-                Err("Navigation target closed or superseded".into()),
-            );
+            state.results.insert(job.generation, Err(error.into()));
         }
     }
     if let Some(init) = state.pending_init.remove(&target) {
         if state.waiters.contains(&init.job.generation) {
-            state.results.insert(
-                init.job.generation,
-                Err("Navigation target closed or superseded".into()),
-            );
+            state.results.insert(init.job.generation, Err(error.into()));
         }
     }
     state.loading.remove(&target);
@@ -488,6 +496,35 @@ fn current_admission(
     })
 }
 
+// Hyperlink admission cannot run guest callbacks. Recheck the current target and
+// use the existing Location fragment algorithm when the queued action is serviced.
+fn navigate_self_hyperlink_fragment(
+    rt: &mut OwnedRuntime,
+    navigation: &auxiliary_pages::Navigation,
+) -> Result<bool, String> {
+    if !navigation.snapshot.self_hyperlink {
+        return Ok(false);
+    }
+    let Ok(url) = ModuleSpecifier::parse(&navigation.url) else {
+        return Ok(false);
+    };
+    if url.fragment().is_none() {
+        return Ok(false);
+    }
+    let _activation = rt.activation_key().enter();
+    deno_core::scope!(scope, rt);
+    let target = auxiliary_pages::context(scope, navigation.target)?;
+    v8::tc_scope!(let scope, scope);
+    let handled = window_proxy::navigate_hyperlink_fragment(scope, target, &url);
+    if scope.has_terminated() {
+        return Err("Execution interrupted by the session execution budget".into());
+    }
+    if let Some(exception) = scope.exception() {
+        return Err(exception.to_rust_string_lossy(scope));
+    }
+    Ok(handled)
+}
+
 fn start(
     rt: &mut OwnedRuntime,
     navigation: auxiliary_pages::Navigation,
@@ -517,7 +554,7 @@ fn start(
             .borrow::<NetworkLog>()
             .begin_page_navigation(&target.0.to_string())
     });
-    cancel(&mut shared, target.0);
+    supersede(&mut shared, target.0);
     let driver_navigation = navigation.snapshot.request.driver_navigation;
     let form_action = navigation.snapshot.request.form_action;
     let future = fetch_job(&shared, navigation, frame, budget_ms);
@@ -1073,12 +1110,7 @@ impl PageSession {
         }
     }
 
-    async fn service_auxiliary_navigation_active(
-        &mut self,
-        owner: Option<u64>,
-        waiter: Option<u64>,
-        execution: &PollExecutionBudget,
-    ) -> Result<(), String> {
+    fn start_queued_auxiliary_navigations(&mut self, owner: Option<u64>) -> Result<(), String> {
         loop {
             let navigation = {
                 let shared = self.rt.op_state();
@@ -1098,6 +1130,9 @@ impl PageSession {
             ) {
                 continue;
             }
+            if navigate_self_hyperlink_fragment(&mut self.rt, &navigation)? {
+                continue;
+            }
             let mode = navigation.history_mode.unwrap_or(if navigation.replace {
                 HistoryMode::Replace
             } else {
@@ -1105,6 +1140,16 @@ impl PageSession {
             });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
         }
+        Ok(())
+    }
+
+    async fn service_auxiliary_navigation_active(
+        &mut self,
+        owner: Option<u64>,
+        waiter: Option<u64>,
+        execution: &PollExecutionBudget,
+    ) -> Result<(), String> {
+        self.start_queued_auxiliary_navigations(owner)?;
         let init = {
             let shared = self.rt.op_state();
             let mut shared = shared.borrow_mut();
@@ -1386,6 +1431,7 @@ impl PageSession {
             policy: pending.policy,
             referrer_policy: pending.referrer_policy,
             user_activation: pending.user_activation,
+            self_hyperlink: false,
             request: RequestPlan {
                 method: Some(pending.plan.method),
                 body: pending.plan.body,
@@ -1735,6 +1781,11 @@ impl PageSession {
             latest - 1,
         );
         if let Some(navigation) = pending {
+            if navigation.snapshot.self_hyperlink
+                && self.finish_action_hyperlink_fragment(&navigation)?
+            {
+                return Ok(ActionCompletion::Released);
+            }
             let mode = navigation.history_mode.unwrap_or(if navigation.replace {
                 HistoryMode::Replace
             } else {
@@ -1771,6 +1822,22 @@ impl PageSession {
                 .await;
         }
         self.action_terminal_outcome(target, latest)
+    }
+
+    fn finish_action_hyperlink_fragment(
+        &mut self,
+        navigation: &auxiliary_pages::Navigation,
+    ) -> Result<bool, String> {
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
+        let result = navigate_self_hyperlink_fragment(&mut self.rt, navigation);
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        if exceeded {
+            self.rt.v8_isolate().cancel_terminate_execution();
+            auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+            return Err("Execution interrupted by the session execution budget".into());
+        }
+        self.finish_history_command(result)
     }
 
     fn action_terminal_outcome(

@@ -73,9 +73,11 @@ export function syncNativeHistory(page, native) {
   if (!hasNativeHistory(page)) return false;
   if (typeof native.liveTargetHistoryState !== "function")
     throw new Error("Native target history capability is unavailable");
-  const snapshot = validateHistorySnapshot(
-    JSON.parse(native.liveTargetHistoryState(page._session)),
-  );
+  return applyNativeHistory(page, native.liveTargetHistoryState(page._session));
+}
+
+function applyNativeHistory(page, encoded) {
+  const snapshot = validateHistorySnapshot(JSON.parse(encoded));
   const previous = page._nativeHistory;
   const session = String(page._session);
   if (previous?.session === session && BigInt(snapshot.revision) < BigInt(previous.revision))
@@ -95,6 +97,42 @@ export function syncNativeHistory(page, native) {
     local: current.id,
   };
   return true;
+}
+
+export async function syncNativeHistoryAcknowledged(page, native, deadline = Infinity) {
+  if (!hasNativeHistory(page)) return false;
+  if (typeof native.liveTargetHistoryStateAsync !== "function")
+    throw new Error("Native acknowledged history capability is unavailable");
+  const session = page._session;
+  const target = page._targetId;
+  const owner = page._actorHub;
+  let encoded;
+  try {
+    try {
+      encoded = native.liveTargetHistoryState(session);
+    } catch (error) {
+      if (error.message !== "Native history mutation is awaiting private acknowledgement")
+        throw error;
+      const remaining = Number.isFinite(deadline) ? deadline - Date.now() : 0;
+      if (Number.isFinite(deadline) && remaining <= 0)
+        throw Object.assign(new Error("Native history acknowledgement wait timed out"), {
+          name: "TimeoutError",
+        });
+      encoded = await native.liveTargetHistoryStateAsync(session, Math.ceil(remaining));
+    }
+  } catch (error) {
+    if (error.message === "Native history acknowledgement wait timed out")
+      error.name = "TimeoutError";
+    throw error;
+  }
+  if (
+    session !== page._session ||
+    target !== page._targetId ||
+    owner !== page._actorHub ||
+    !hasNativeHistory(page)
+  )
+    throw new Error("Native history read target closed or superseded");
+  return applyNativeHistory(page, encoded);
 }
 
 export function retiredNativeHistoryTarget(page) {
@@ -125,7 +163,7 @@ function validateHistoryEvent(page, event) {
     throw new Error("Native history notification has no owned entry identity");
 }
 
-export function notifyNativeHistory(page, native, event) {
+function validateNativeHistoryNotification(page, event) {
   if (retiredNativeHistoryTarget(page)) return false;
   validateHistoryEvent(page, event);
   const session = String(page._session);
@@ -134,14 +172,31 @@ export function notifyNativeHistory(page, native, event) {
     if (eventFields.every((field) => previous[field] === event[field])) return false;
     throw new Error("Native history notifications are out of order");
   }
-  if (!syncNativeHistory(page, native))
-    throw new Error("Native history notification has no target");
+  return true;
+}
+
+function publishNativeHistoryNotification(page, event) {
+  const session = String(page._session);
   page._nativeHistoryEvent = {
     session,
     ...Object.fromEntries(eventFields.map((field) => [field, event[field]])),
   };
   emitNativeFrameNavigation(page, event.url);
   return true;
+}
+
+export function notifyNativeHistory(page, native, event) {
+  if (!validateNativeHistoryNotification(page, event)) return false;
+  if (!syncNativeHistory(page, native))
+    throw new Error("Native history notification has no target");
+  return publishNativeHistoryNotification(page, event);
+}
+
+export async function notifyNativeHistoryAcknowledged(page, native, event, deadline) {
+  if (!validateNativeHistoryNotification(page, event)) return false;
+  if (!(await syncNativeHistoryAcknowledged(page, native, deadline)))
+    throw new Error("Native history notification has no target");
+  return publishNativeHistoryNotification(page, event);
 }
 
 export function emitNativeFrameNavigation(page, url) {

@@ -59,6 +59,15 @@ fn store(state: &mut OpState) -> &mut Histories {
     }
     state.borrow_mut::<Histories>()
 }
+/// Read committed history progress without consulting authored Window properties.
+pub(super) fn current_revision(state: &OpState, target: u64) -> Option<u64> {
+    state
+        .try_borrow::<Histories>()?
+        .targets
+        .get(&target)
+        .map(|history| history.revision())
+}
+
 fn failure(message: impl Into<std::borrow::Cow<'static, str>>) -> JsErrorBox {
     JsErrorBox::generic(message)
 }

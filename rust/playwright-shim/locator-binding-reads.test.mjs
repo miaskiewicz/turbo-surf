@@ -187,3 +187,44 @@ test(
       }
     }),
 );
+
+test("direct live dispatch resolves in the actor without an extra query preparation", async () =>
+  fixture(async (page) => {
+    await page.evaluate(() => {
+      document.querySelector("#shift").addEventListener("click", (event) => {
+        event.currentTarget.setAttribute("data-clicked", "once");
+      });
+    });
+    const locator = page.locator("#shift");
+    const prepareQuery = locator._prepareQuery.bind(locator);
+    let preparations = 0;
+    locator._prepareQuery = async () => {
+      preparations++;
+      await prepareQuery();
+    };
+    await locator.dispatchEvent("click");
+    assert.equal(preparations, 0);
+    assert.equal(await locator.getAttribute("data-clicked"), "once");
+    assert.equal(await locator.isVisible(), true);
+    assert.equal(preparations, 2);
+  }));
+
+test("a covering element keeps branched controls from receiving an early click", async () =>
+  fixture(async (page) => {
+    await page.evaluate(() => {
+      document.body.innerHTML = `
+        <button id="covered" style="position:fixed;left:0;top:0;width:100px;height:40px">
+          <span>One</span><span>Two</span>
+        </button>
+        <div id="cover" style="position:fixed;inset:0;z-index:2"></div>`;
+      document.querySelector("#covered").addEventListener("click", (event) => {
+        event.currentTarget.setAttribute("data-clicked", "true");
+      });
+    });
+    const button = page.locator("#covered");
+    await assert.rejects(button.click({ timeout: 100 }), { name: "TimeoutError" });
+    assert.equal(await button.getAttribute("data-clicked"), null);
+    await page.evaluate(() => document.querySelector("#cover").remove());
+    await button.click();
+    assert.equal(await button.getAttribute("data-clicked"), "true");
+  }));

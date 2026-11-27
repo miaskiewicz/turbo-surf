@@ -97,6 +97,125 @@ async fn profiled_page(
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn detached_render_construction_reuses_connected_document_geometry() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>
+      #target{width:60px;height:20px;padding:0;border:0}
+      </style><body><div id=target></div><script>
+      const target=document.getElementById('target'),scratch=[];
+      globalThis.widths=[];
+      for(let index=0;index<6;index++){
+        widths.push(target.clientWidth);
+        const host=document.createElement('div');
+        const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+        icon.appendChild(document.createElementNS('http://www.w3.org/2000/svg','path'));
+        host.appendChild(icon);host.setAttribute('class','detached');
+        host.style.padding='9px';host.textContent='detached text';
+        const input=document.createElement('input');input.defaultChecked=false;
+        host.appendChild(input);scratch.push(host);
+      }
+      globalThis.allDetached=scratch.every(node=>!node.isConnected);
+      </script>"#;
+    let (mut page, profile, _directory) = profiled_page("detached-render", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[60,60,60,60,60,60]"
+    );
+    assert_eq!(
+        page.eval_expression("String(allDetached)").await.unwrap(),
+        "true"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(profile["cacheMisses"], 1);
+    assert_eq!(profile["cacheHits"], 5);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn connected_shadow_trees_preserve_detached_construction_cache_reuse() {
+    let _environment = PROFILE_ENV.lock().await;
+    for mode in ["open", "closed"] {
+        let html = format!(
+            r#"<!doctype html><div id="target" style="width:60px;height:20px"></div>
+<next-route-announcer id="host"></next-route-announcer><script>
+const shadow=document.querySelector('#host').attachShadow({{mode:'{mode}'}});
+shadow.innerHTML='<span>Announcement</span>';
+globalThis.widths=[];globalThis.scratch=[];
+for(let index=0;index<6;index++){{
+  widths.push(document.querySelector('#target').clientWidth);
+  const node=document.createElement('div');node.textContent='detached';scratch.push(node);
+}}
+</script>"#
+        );
+        let (mut page, profile, _directory) = profiled_page("connected-shadow", &html).await;
+        assert_eq!(
+            page.eval_expression("JSON.stringify(widths)")
+                .await
+                .unwrap(),
+            "[60,60,60,60,60,60]",
+            "mode={mode}"
+        );
+        assert_eq!(profile["stages"]["layout"]["calls"], 1, "mode={mode}");
+        assert_eq!(profile["cacheMisses"], 1, "mode={mode}");
+        assert_eq!(profile["cacheHits"], 5, "mode={mode}");
+        page.close();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_allocations_reuse_prepared_sheet_targets() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>#target{width:60px;height:20px}</style>
+<div id="target"></div><script>
+globalThis.widths=[];globalThis.scratch=[];
+for(let index=0;index<6;index++){
+  widths.push(document.querySelector('#target').clientWidth);
+  scratch.push(document.createElement('div'));
+}
+</script>"#;
+    let (mut page, profile, _directory) = profiled_page("detached-preparation", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[60,60,60,60,60,60]"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(profile["cacheHits"], 5);
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 1);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_targets_refresh_for_checked_state_and_cssom() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>
+#target{width:20px;height:20px}
+#host:has(input:checked) #target{width:40px}
+#host:has(input:focus) #target{width:80px!important}
+</style><div id="host"><input id="input" type="checkbox"><div id="target"></div></div><script>
+const target=document.querySelector('#target'),input=document.querySelector('#input');
+globalThis.widths=[target.clientWidth];
+globalThis.scratch=document.createElement('div');widths.push(target.clientWidth);
+input.checked=true;widths.push(target.clientWidth);widths.push(target.clientWidth);
+document.styleSheets[0].insertRule('#host:has(input:checked) #target{width:60px}',3);
+widths.push(target.clientWidth);
+</script>"#;
+    let (mut page, profile, _directory) = profiled_page("prepared-selector-state", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[20,20,40,40,60]"
+    );
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 3);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     let _environment = PROFILE_ENV.lock().await;
     let mut html = String::from(
@@ -118,6 +237,8 @@ async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     assert_eq!(profile["stages"]["layout"]["calls"], 1);
     assert_eq!(profile["cacheMisses"], 1);
     assert_eq!(profile["cacheHits"], 11);
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 1);
     assert_eq!(
         profile["stages"]["animationInspection"]["calls"]
             .as_u64()
@@ -333,6 +454,129 @@ async fn timer_only_post_load_work_hands_off_without_losing_finite_document_work
     assert!(
         diagnostics.progress.completed_pumps < 500,
         "timer-only work exhausted the native-work pump instead of reaching full quiescence: {diagnostics:?}"
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_sheets_observe_cssom_dom_and_live_selector_changes() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>input{box-sizing:border-box;padding:0;border:0;width:10px;height:20px}</style>
+      <style id=rules>input:checked{width:30px}</style><body><input id=control type=checkbox><script>
+      globalThis.widths=[];
+      const read=()=>{widths.push(control.getBoundingClientRect().width);widths.push(control.getBoundingClientRect().width)};
+      read();control.checked=true;read();
+      rules.sheet.cssRules[0].style.width='50px';read();
+      rules.textContent='input:checked{width:70px}';read();
+      rules.sheet.disabled=true;read();rules.sheet.disabled=false;read();
+      rules.sheet.media.mediaText='not all';read();rules.sheet.media.mediaText='all';read();
+      const adopted=new CSSStyleSheet();adopted.replaceSync('input:checked{width:90px}');
+      document.adoptedStyleSheets=[adopted];read();document.adoptedStyleSheets=[];read();
+      </script>"#;
+    let (mut page, profile, _directory) = profiled_page("sheet-invalidation", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[10,10,30,30,50,50,70,70,10,10,70,70,10,10,70,70,90,90,70,70]"
+    );
+    assert!(profile["stages"]["sheetExport"]["calls"].as_u64().unwrap() < 40);
+    assert!(
+        profile["stages"]["selectorPreparation"]["calls"]
+            .as_u64()
+            .unwrap()
+            < 40
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dom_mutations_reuse_raw_sheets_but_rematch_current_targets() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = "<!doctype html><style>#target{box-sizing:border-box;width:40px;height:20px}#target.ready{width:70px}</style><div id=target></div><script>const target=document.getElementById('target');globalThis.widths=Array.from({length:12},(_,index)=>{target.className=index%2?'ready':'';target.setAttribute('data-version',String(index));return target.getBoundingClientRect().width;});</script>";
+    let (mut page, profile, _directory) = profiled_page("raw-sheets", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[40,70,40,70,40,70,40,70,40,70,40,70]"
+    );
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 12);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn raw_sheet_reuse_tracks_native_media_disabled_rules_and_sheet_identity() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style id=rules>#target{width:40px!important}</style><div id=target style="width:10px;height:20px"></div><script>
+      const target=document.getElementById('target'),owner=document.getElementById('rules'),sheet=owner.sheet;
+      const widths=[],read=()=>widths.push(target.getBoundingClientRect().width);
+      read();owner.setAttribute('media','not all');read();owner.setAttribute('media','all');read();
+      sheet.disabled=true;read();sheet.disabled=false;read();
+      sheet.cssRules[0].style.setProperty('width','60px','important');read();
+      owner.textContent='#target{width:70px!important}#target.ready{width:80px!important}';read();
+      target.className='ready';read();target.className='';read();
+      sheet.cssRules[0].style.setProperty('width','90px','important');read();
+      globalThis.widths=widths;
+    </script>"#;
+    let (mut page, _profile, _directory) = profiled_page("raw-sheet-state", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[40,10,40,10,40,60,70,80,70,70]"
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn warmed_own_none_rectangles_do_not_enter_layout_capture() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style id=sheet>input{box-sizing:border-box;width:40px;height:20px}</style>
+      <body><input id=visible><script>
+      const subject=document.getElementById('sheet');
+      globalThis.position=getComputedStyle(subject).position;
+      globalThis.hiddenRects=Array.from({length:12},()=>{
+        const rect=subject.getBoundingClientRect();
+        return [rect.x,rect.y,rect.width,rect.height,subject.getClientRects().length];
+      });
+      globalThis.visibleWidth=document.getElementById('visible').getBoundingClientRect().width;
+      </script>"#;
+    let (mut page, profile, directory) = profiled_page("cached-own-none", html).await;
+    assert_eq!(
+        page.eval_json_expression("hiddenRects").await.unwrap(),
+        serde_json::to_string(&vec![vec![0; 5]; 12]).unwrap()
+    );
+    assert_eq!(
+        page.eval_expression("String(visibleWidth)").await.unwrap(),
+        "40"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(
+        profile["cacheHits"], 0,
+        "proven empty rect reads must return before capture and layout cache lookup"
+    );
+    page.close();
+    drop(directory);
+    let metric_html = html.replace(
+        "globalThis.visibleWidth=",
+        "globalThis.clientWidth=subject.clientWidth;globalThis.visibleWidth=",
+    );
+    let (mut page, metric_profile, _directory) =
+        profiled_page("cached-own-none-metric", &metric_html).await;
+    assert_eq!(
+        page.eval_expression("String(globalThis.clientWidth)")
+            .await
+            .unwrap(),
+        "0"
+    );
+    let calls = |value: &serde_json::Value| {
+        value["cacheHits"].as_u64().unwrap_or(0) + value["cacheMisses"].as_u64().unwrap_or(0)
+    };
+    assert!(
+        calls(&metric_profile) > calls(&profile),
+        "client metrics must keep their normal native geometry path"
     );
     page.close();
 }

@@ -79,8 +79,8 @@ impl NetworkEventLog {
     pub(crate) fn owns_host_bodies(&self) -> bool {
         self.host_bodies.load(Ordering::Acquire)
     }
-    /// Publish the final host interception decision through the same response/body
-    /// protocol as transport observations. IDs and provenance belong to this hub.
+    /// Publish the final host interception decision through the same response or
+    /// failed-request protocol as transport. IDs and provenance belong to this hub.
     pub fn publish_intercepted_response(&self, mut header: serde_json::Value, body: &[u8]) {
         if self.is_closed() {
             return;
@@ -89,6 +89,14 @@ impl NetworkEventLog {
         header["event"] = "response".into();
         header["id"] = id.into();
         header["provenance"] = "intercepted".into();
+        if header["status"] == 0 {
+            // A host abort has no response body and must not acquire a body waiter
+            // or later publish requestfinished through a response-body terminal.
+            header["bodyPending"] = false.into();
+            header["bodyIncomplete"] = false.into();
+            self.push(header);
+            return;
+        }
         header["bodyPending"] = true.into();
         header["bodyIncomplete"] = true.into();
         self.push(header);
@@ -503,6 +511,24 @@ mod tests {
         log.close();
         log.publish_intercepted_response(serde_json::json!({"status":200}), b"late");
         assert_eq!(log.drain(), "[]");
+    }
+    #[test]
+    fn intercepted_abort_has_no_response_body_or_pending_terminal() {
+        let log = NetworkEventLog::default();
+        log.publish_intercepted_response(
+            serde_json::json!({"status":0,"error":"net::ERR_FAILED",
+                "context":{"frame":{"pageId":"root"}}}),
+            b"not a response body",
+        );
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["event"], "response");
+        assert_eq!(rows[0]["status"], 0);
+        assert_eq!(rows[0]["error"], "net::ERR_FAILED");
+        assert_eq!(rows[0]["provenance"], "intercepted");
+        assert_eq!(rows[0]["bodyPending"], false);
+        assert!(rows[0].get("bodyBytes").is_none());
+        assert!(log.wait_target_response_completion("root", std::time::Duration::ZERO));
     }
     #[test]
     fn target_cancellation_waits_for_real_observed_body_terminals() {

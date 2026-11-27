@@ -11,6 +11,7 @@ const __locatorPrevious = Object.getOwnPropertyDescriptor(
   "previousElementSibling",
 ).get;
 const __locatorMatches = Element.prototype.matches;
+const __locatorGetAttribute = Element.prototype.getAttribute;
 const __locatorDocumentId = Document.prototype.getElementById;
 const __locatorFragmentId = DocumentFragment.prototype.getElementById;
 const __locatorControl = Object.getOwnPropertyDescriptor(HTMLLabelElement.prototype, "control").get;
@@ -72,6 +73,7 @@ __G.tcLocatorAll = () => {
   __locatorRefresh();
   return __locatorSlice(__locatorIndex);
 };
+__G.tcLocatorAttribute = (element, name) => __locatorApply(__locatorGetAttribute, element, [name]);
 __G.tcLocatorParent = (element) => {
   const parent = __locatorApply(__locatorParent, element, []);
   if (parent) return parent;
@@ -130,7 +132,7 @@ __G.tcLocatorLightQuery = (element, selector) =>
   __locatorSlice(__locatorNativeQuery(__locatorApply(__locatorRoot, element, []), selector));
 
 // Metadata keeps each actual tree scope intact. Imports use an inert document
-// with no custom-element registry, and copy only light children. Reading a
+// with no custom-element registry; serialization keeps light tree scopes. Reading a
 // locator must neither upgrade application elements nor flatten nested roots.
 const __locatorImplementation = __document.implementation;
 const __locatorCreateDocument = DOMImplementation.prototype.createHTMLDocument;
@@ -165,21 +167,10 @@ function __locatorChildren(node) {
   return result;
 }
 function __locatorInertCopy(source) {
-  const document = __locatorMetadataOwner();
-  const copy = __locatorApply(__locatorImport, document, [source, false]);
-  const pending = __list();
-  __locatorPush(pending, { __proto__: null, source, copy });
-  while (pending.length) {
-    const current = __locatorPop(pending);
-    const children = __locatorChildren(current.source);
-    for (let index = 0; index < children.length; index++) {
-      const child = __locatorApply(__locatorImport, document, [children[index], false]);
-      __locatorApply(__locatorAppend, current.copy, [child]);
-      __locatorPush(pending, { __proto__: null, source: children[index], copy: child });
-    }
-  }
-  return copy;
+  // One native import avoids reconciling ownership after every copied child.
+  return __locatorApply(__locatorImport, __locatorMetadataOwner(), [source, true]);
 }
+
 function __locatorMetadataRoot(root) {
   const document = __locatorApply(__locatorType, root, []) === 9;
   let copy;

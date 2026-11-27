@@ -2,17 +2,17 @@
 
 [package]
 name = "turbo-surf-packaged-consumer"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2021"
 publish = false
 
 [dependencies]
-turbo-surf-core = "=0.8.6"
-turbo-surf-view = "=0.8.6"
-turbo-surf-page = "=0.8.6"
-turbo-surf-render = "=0.8.6"
-turbo-surf-mcp = "=0.8.6"
-turbo-dom-parser = { package = "turbo-dom", version = "=0.8.6" }
+turbo-surf-core = "=0.8.7"
+turbo-surf-view = "=0.8.7"
+turbo-surf-page = "=0.8.7"
+turbo-surf-render = "=0.8.7"
+turbo-surf-mcp = "=0.8.7"
+turbo-dom-parser = { package = "turbo-dom", version = "=0.8.7" }
 # The synthetic screenshot / canvas raster tier, published from turbo-dom.
-turbo-dom-raster = "=0.8.6"
+turbo-dom-raster = "=0.8.7"
 serde_json = "1"

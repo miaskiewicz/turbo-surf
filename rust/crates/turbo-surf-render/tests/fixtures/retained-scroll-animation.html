@@ -1,0 +1,10 @@
+<!doctype html><style>
+body{min-height:2000px}#target{width:200px;height:40px}
+#scroll{position:absolute;left:500px;top:500px;width:100px;height:40px;overflow:hidden}
+#scroll>div{height:200px}
+#clip{position:absolute;left:400px;top:100px;width:100px;height:30px;overflow:hidden}
+#animated{position:absolute;inset:0;transform:scale(1)}
+#animated.active{animation:public-ripple 550ms linear}
+@keyframes public-ripple{from{transform:scale(0);opacity:.1}to{transform:scale(1);opacity:.3}}
+</style><div id="target">Stable target</div><div id="scroll"><div></div></div><div id="clip"><span id="animated"></span></div><button id="measure">Measure</button>
+<script>document.querySelector('#measure').onclick=()=>{document.querySelector('#animated').className='active';try{globalThis.result={rect:document.querySelector('#target').getBoundingClientRect().toJSON()}}catch(error){globalThis.result={error:String(error),stack:error.stack}}};</script>

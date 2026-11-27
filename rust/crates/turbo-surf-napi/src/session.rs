@@ -2180,8 +2180,7 @@ pub fn live_target_network_state(id: u32) -> Result<String> {
 }
 
 /// Read one authenticated target's native history metadata without entering V8.
-#[napi]
-pub fn live_target_history_state(id: u32) -> Result<String> {
+fn history_snapshot_owner(id: u32) -> Result<(Arc<LiveActor>, String)> {
     let (actor, target) = {
         let live = live_registry()
             .lock()
@@ -2209,11 +2208,40 @@ pub fn live_target_history_state(id: u32) -> Result<String> {
     if info.closed || cancelling || actor.auxiliary.is_closed() {
         return Err(Error::from_reason("Native history target is closed"));
     }
+    Ok((actor, key))
+}
+
+#[napi]
+pub fn live_target_history_state(id: u32) -> Result<String> {
+    let (actor, key) = history_snapshot_owner(id)?;
     actor
         .history_log
         .snapshot(&key)
         .map(|value| value.to_string())
         .map_err(Error::from_reason)
+}
+
+/// Wait on an owned publication without occupying the libuv pool that active
+/// navigation/host-route commands need to finish. Deadline includes queue time.
+#[napi]
+pub fn live_target_history_state_async(
+    env: Env,
+    id: u32,
+    timeout_ms: u32,
+) -> Result<napi::JsObject> {
+    let (actor, target) = history_snapshot_owner(id)?;
+    let deadline = (timeout_ms != 0).then(|| {
+        std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms))
+    });
+    env.spawn_future(async move {
+        let value = actor
+            .history_log
+            .snapshot_acknowledged_async(&target, deadline)
+            .await
+            .map_err(Error::from_reason)?;
+        history_snapshot_owner(id)?;
+        Ok(value.to_string())
+    })
 }
 
 /// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.

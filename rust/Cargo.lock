@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1957,6 +1957,16 @@ checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
 dependencies = [
  "opaque-debug",
  "polyval",
+]
+
+[[package]]
+name = "gif"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae047235e33e2829703574b54fdec96bfbad892062d97fed2f76022287de61b"
+dependencies = [
+ "color_quant",
+ "weezl",
 ]
 
 [[package]]
@@ -2578,13 +2588,13 @@ dependencies = [
  "bytemuck",
  "byteorder-lite",
  "color_quant",
- "gif",
+ "gif 0.14.2",
  "image-webp",
  "moxcms",
  "num-traits",
  "png 0.18.1",
- "zune-core",
- "zune-jpeg",
+ "zune-core 0.5.1",
+ "zune-jpeg 0.5.15",
 ]
 
 [[package]]
@@ -2669,7 +2679,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4310,12 +4320,15 @@ version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8928798c0a55e03c9ca6c4c6846f76377427d2c1e1f7e6de3c06ae57942df43"
 dependencies = [
+ "gif 0.13.3",
+ "image-webp",
  "log",
  "pico-args",
  "rgb",
  "svgtypes",
  "tiny-skia",
  "usvg",
+ "zune-jpeg 0.4.21",
 ]
 
 [[package]]
@@ -5814,9 +5827,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca32786ddbea983986ed455d11fb4170b17f6b1cd5de9794158edd3663a27861"
+checksum = "362d1b822a22d9e37827db0b6ae2ff7c52983977dad896f641a0054e2ae08471"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5830,9 +5843,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feab6d9de0d59af4e619c908c8a35f98a4b1591b1be93c3888bb541de6f4cf8e"
+checksum = "d957373cda0f4af2af9b891d9826dcc32003670d0609ff03944dd3e4f130b3e6"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5849,9 +5862,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c86ed183966210c0a0bd773251630ea2b3284a8c66fcad8be23cd0c62b15b87"
+checksum = "15b2eb0b5b0f3a997fbd6fcd0e0c405edbd7db3d9b82a21357d416d7d75bf28f"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5872,9 +5885,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "794604a9d30debd4bc0e68930c195ffda78a550512100818c0734bb14fdf0661"
+checksum = "da66e4ef938893c913bb6f5e6ce52458faaf9edbe6483ca2616d6e662e39c47a"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5959,7 +5972,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-trait",
  "base64",
@@ -6127,7 +6140,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-trait",
  "base64",
@@ -6148,7 +6161,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "image",
  "mime_guess",
@@ -6170,7 +6183,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6182,7 +6195,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "pyo3",
  "serde",
@@ -6197,7 +6210,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-trait",
  "base64",
@@ -6262,14 +6275,14 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "swc_core",
 ]
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "criterion",
  "regex",
@@ -6881,7 +6894,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7304,9 +7317,24 @@ dependencies = [
 
 [[package]]
 name = "zune-core"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
+
+[[package]]
+name = "zune-core"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb8a0807f7c01457d0379ba880ba6322660448ddebc890ce29bb64da71fb40f9"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
+dependencies = [
+ "zune-core 0.4.12",
+]
 
 [[package]]
 name = "zune-jpeg"
@@ -7314,5 +7342,5 @@ version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
- "zune-core",
+ "zune-core 0.5.1",
 ]

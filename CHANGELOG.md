@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.8.7] - 2026-11-26 (unreleased candidate)
+
+- Retry locator clicks within the original action timeout when the target disappears before the first pointer event. Re-resolve the locator and deliver a single click.
+- Reduce synthetic click and page refresh overhead by reusing metadata from the completed native action.
+- Preserve the active document when a self-targeted link changes only its fragment.
+- Reuse prepared stylesheet selectors while the connected document and style inputs remain equivalent.
+- Skip native storage rewrites when sparse storage is current and collection would reclaim nothing, while still reconciling document ownership and cleaning up weak handles.
+- Use the published Turbo-DOM 0.8.7 crates and verify all four registry checksums.
+- All 46 payroll auth cases passed on a freshly built optimized addon pinned to Turbo-DOM `3c538a6e`, with animations disabled and the fixture unchanged. The wider payroll suite remains open.
+
+- Publish aborted intercepted fetch/XHR requests through the native event hub, with one request failure and no response or request-finished event.
+- Reuse solved layout across proven detached DOM construction using turbo-dom's native document checkpoint, retaining full-version capture and connected-mutation checks.
+- Admit unrelated paint/transform animations behind applicable isolated HTML clips during rectangle reads with retained scroll offsets; preserve unsupported dependencies and exclude top-layer escape cases.
+- Preserve the FormData constructor's native document across navigation and collection, including retained constructors and multipart uploads.
+- Distinguish superseded navigation from genuine target closure so existing interrupted-navigation handling receives the correct error.
+- Keep lifecycle history delivery independent of the initiating caller's deadline.
+- Preserve root/BODY scroll ownership under containment, and keep size query containers from becoming fixed-position containing blocks.
+- Wait for proven finite pointer-transparent geometry dependencies during visibility polling within the existing deadline.
+- Consume the turbo-dom v0.8.7 scrollport and hit-clipping ownership fixes together. Record the latest packaged auth and offline gate results in [the acceptance receipt](docs/release/0.8.7-payroll-auth-2026-11-24.md); the wider payroll suite remains incomplete.
+
+- Wait for attached input controls when reading their values, preserving empty values and missing-element timeouts.
+- Keep native history URLs authoritative during RSC refreshes and wait for private history acknowledgements without occupying the host worker pool.
+- Scroll real click targets within their owning viewport and scroll containers before computing hit coordinates.
+- Return empty visual rectangles from a current native cached own-display-none proof before layout capture, preserving the normal path for uncertain geometry and all client/offset/observer metrics.
+- Observe locator assertions without waiting for unrelated background response bodies.
+- Preserve native target-read exceptions, including errors raised while serializing results.
+- Dispatch contained-control clicks at the actual target and skip pointer-transparent descendants that can detach during pointer events.
+- Read native and ARIA checked state after real clicks, including retained element handles.
+- Wait for proven finite, running, non-filling animations during locator readiness without changing animation presentation or caller deadlines.
+- Narrow dynamic CSS selector candidates by element type while preserving more selective ID/class buckets and live state matching.
+- Avoid source-element scans for pseudo-element rules and narrow positive functional selector alternatives without caching live matches.
+- Keep user-agent rules in stable scope order so identical geometry reads reuse their prepared stylesheet and layout caches.
+- Wait for proven finite, pointer-transparent ripple animations before ambiguous click hit testing, preserving caller deadlines and one input dispatch.
+- Consume native History, DOMParser, XPath value admission and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
+
+- Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.
+- Terminate observed response records when interrupted fetch operations are dropped.
+
+- Finish native actions at admitted network navigation and committed same-document navigation, preserving caller deadlines and execution failures.
+- Read live locator attributes through the captured native getter without copying document metadata.
+- Reuse bounded CSS rule plans while matching current document state, and admit changed inline styles without rescanning unrelated resources.
+- Consume the turbo-dom v0.8.7 development fixes for cross-document scheduling, inert text quotas, and native CSS state. All 46 original payroll auth cases pass on the packaged native engine, with zero retries or skips.
+
 ## [0.8.6] - 2026-11-20 (unreleased candidate)
 
 - #524 full-scope push: `render_script_with_completion` now drains the render tier's console / pageerror / request / response events into the session event log before closing the PageSession. `Session::capture_network_events` redacts `cookie`, `authorization`, `proxy-authorization`, `set-cookie` header values (replaced with `<redacted>`) and drops `body` / `bodyBytes` / `requestBody` payloads (replaced with a `*Dropped: true` marker) so HttpOnly credentials and response bodies never land in the default diagnostic stream. `responsebody` continuation entries are filtered because their fields already merge onto the `response` event in `drain_snapshot`. Offline regression `capture_network_events_pumps_console_pageerror_and_redacts_cookies` asserts the filter and the redaction set.

@@ -95,7 +95,11 @@ function assertPartialRetryTerminal(final, observation, terminal, html, label) {
   assert.equal(new URL(final.url).pathname, "/terminal", label);
   assert.equal(terminal?.status, 429, label);
   assert.equal(terminal.requestUrl, new URL(final.url).pathname + new URL(final.url).search, label);
-  assert(terminal.timeMs <= observation.deadlineMs, label);
+  // A guest timer can submit navigation at the observation cutoff while the
+  // loopback request reaches the server on the next host turn.
+  const fired = terminal.timerEvidence?.timerFiredDate;
+  assert(Number.isFinite(fired) && fired <= observation.deadlineMs, label);
+  assert(fired <= terminal.timeMs, label);
   assert(terminal.timeMs < observation.snapshotStartedMs, label);
   const assignment = `globalThis.__browserFixture=${JSON.stringify(terminal.timerEvidence).replaceAll("<", "\\u003c")}`;
   assert(html.includes(`<script>${assignment}</script>`), label);
@@ -344,7 +348,18 @@ test("partial terminal evidence requires its current document and exact pending 
   assert.throws(() => check(final, { ...terminal, status: 200 }));
   assert.throws(() => check(final, { ...terminal, requestUrl: "/terminal?timer=forged" }));
   assert.throws(() => check(final, { ...terminal, timeMs: 2000 }));
-  assert.throws(() => check(final, { ...terminal, timeMs: 1875 }));
+  const boundaryClock = { ...clock, timerFiredDate: observation.deadlineMs };
+  const boundaryHtml = html.replace(JSON.stringify(clock), JSON.stringify(boundaryClock));
+  check(final, { ...terminal, timeMs: 1851, timerEvidence: boundaryClock }, boundaryHtml);
+  assert.throws(() => check(final, { ...terminal, timeMs: 1599 }));
+  const lateClock = { ...clock, timerFiredDate: 1851 };
+  assert.throws(() =>
+    check(
+      final,
+      { ...terminal, timeMs: 1852, timerEvidence: lateClock },
+      html.replace(JSON.stringify(clock), JSON.stringify(lateClock)),
+    ),
+  );
   assert.throws(() => check(final, terminal, "<body>stale"));
   assert.throws(() => check(final, terminal, html.replace('"delayMs":600', '"delayMs":1')));
 });
@@ -451,7 +466,9 @@ test("final retry validation preserves only an authenticated loading terminal ph
     chromeTrace.responses = [{ type: "document", url, status: 429 }];
     assert.throws(() => check(chromeTrace, fixture, terminal, "chrome"));
 
-    assert.throws(() => check(trace, fixture, { ...terminal, timeMs: 1950 }));
+    assert.throws(() =>
+      check(trace, fixture, { ...terminal, timeMs: trace.observation.snapshotStartedMs }),
+    );
     assert.throws(
       () =>
         check(trace, fixture, {

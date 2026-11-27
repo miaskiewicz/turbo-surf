@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   notifyNativeHistory,
+  notifyNativeHistoryAcknowledged,
   syncNativeHistory,
+  syncNativeHistoryAcknowledged,
   validateHistorySnapshot,
 } from "./history-snapshot.mjs";
 const row = (row, group, local, url = "/same") => ({ row, group, local, url });
@@ -251,4 +253,153 @@ test("retired targets skip native reads and listener errors preserve the latest 
     /listener failure/,
   );
   assert.equal(f.page._url, "/same");
+});
+
+function pendingFixture() {
+  const f = fixture();
+  f.native.liveTargetHistoryState = () => {
+    throw new Error("Native history mutation is awaiting private acknowledgement");
+  };
+  return f;
+}
+
+test("acknowledged history read waits for owned publication without reading pending metadata", async () => {
+  const f = pendingFixture();
+  let publish;
+  let calls = 0;
+  f.native.liveTargetHistoryState = () => {
+    throw new Error("Native history mutation is awaiting private acknowledgement");
+  };
+  f.native.liveTargetHistoryStateAsync = (id, timeout) => {
+    calls++;
+    assert.equal(id, 7);
+    assert.equal(timeout, 0);
+    return new Promise((resolve) => {
+      publish = resolve;
+    });
+  };
+  const reading = syncNativeHistoryAcknowledged(f.page, f.native);
+  assert.equal(f.page._url, "/raw");
+  await new Promise((resolve) => setImmediate(resolve));
+  publish(JSON.stringify(snapshot()));
+  assert.equal(await reading, true);
+  assert.equal(calls, 1);
+  assert.equal(f.page._url, "/same");
+});
+
+test("acknowledged history preserves the caller deadline and native timeout error", async () => {
+  const f = pendingFixture();
+  let calls = 0;
+  const error = new Error("Native history acknowledgement wait timed out");
+  f.native.liveTargetHistoryStateAsync = async (_id, timeout) => {
+    calls++;
+    assert.ok(timeout > 0 && timeout <= 1000);
+    throw error;
+  };
+  await assert.rejects(
+    syncNativeHistoryAcknowledged(f.page, f.native, Date.now() + 1000),
+    (actual) => actual === error && actual.name === "TimeoutError",
+  );
+  await assert.rejects(syncNativeHistoryAcknowledged(f.page, f.native, Date.now() - 1), {
+    name: "TimeoutError",
+  });
+  assert.equal(calls, 1);
+  assert.equal(f.page._url, "/raw");
+});
+
+test("acknowledged history does not retry or replace genuine native errors", async () => {
+  for (const message of [
+    "Native history metadata lock poisoned",
+    "Native history target is closed",
+    "Native history mutation is awaiting private acknowledgement",
+  ]) {
+    const f = pendingFixture();
+    let calls = 0;
+    const error = new Error(message);
+    f.native.liveTargetHistoryStateAsync = async () => {
+      calls++;
+      throw error;
+    };
+    await assert.rejects(
+      syncNativeHistoryAcknowledged(f.page, f.native),
+      (actual) => actual === error,
+    );
+    assert.equal(calls, 1);
+    assert.equal(f.page._url, "/raw");
+  }
+});
+
+test("acknowledged history cannot apply a snapshot after its actual Page owner changes", async () => {
+  const f = pendingFixture();
+  let publish;
+  f.native.liveTargetHistoryStateAsync = () =>
+    new Promise((resolve) => {
+      publish = resolve;
+    });
+  const reading = syncNativeHistoryAcknowledged(f.page, f.native);
+  f.page._session = 8;
+  publish(JSON.stringify(snapshot()));
+  await assert.rejects(reading, /closed or superseded/);
+  assert.equal(f.page._url, "/raw");
+});
+
+test("history notifications wait for acknowledgement before publishing ordered events", async () => {
+  const f = pendingFixture();
+  let publish;
+  f.native.liveTargetHistoryStateAsync = () =>
+    new Promise((resolve) => {
+      publish = resolve;
+    });
+  const event = {
+    target: "20",
+    document: "71",
+    group: "40",
+    revision: "9",
+    row: "3",
+    local: 1,
+    url: "/same",
+  };
+  const notifying = notifyNativeHistoryAcknowledged(f.page, f.native, event);
+  assert.equal(f.events.length, 0);
+  publish(JSON.stringify(snapshot()));
+  assert.equal(await notifying, true);
+  assert.equal(f.events.length, 1);
+  assert.equal(f.page._nativeHistoryEvent.revision, "9");
+});
+
+test("ready acknowledged metadata never enters an asynchronous worker", async () => {
+  const f = fixture();
+  f.native.liveTargetHistoryStateAsync = () => {
+    throw new Error("unnecessary async read");
+  };
+  assert.equal(await syncNativeHistoryAcknowledged(f.page, f.native), true);
+  assert.equal(f.page._url, "/same");
+});
+
+test("already acknowledged publication does not invent an expired wait", async () => {
+  const f = fixture();
+  let waits = 0;
+  f.native.liveTargetHistoryStateAsync = () => {
+    waits++;
+    throw new Error("unexpected wait");
+  };
+  assert.equal(await syncNativeHistoryAcknowledged(f.page, f.native, Date.now() - 1), true);
+  assert.equal(waits, 0);
+  assert.equal(f.page._url, "/same");
+});
+
+test("an expired observer cannot replace a fatal native publication error", async () => {
+  const f = fixture();
+  const error = new Error("Native history metadata lock poisoned");
+  f.native.liveTargetHistoryState = () => {
+    throw error;
+  };
+  f.native.liveTargetHistoryStateAsync = () => {
+    throw new Error("unexpected wait");
+  };
+  await assert.rejects(
+    syncNativeHistoryAcknowledged(f.page, f.native, Date.now() - 1),
+    (actual) => actual === error,
+  );
+  assert.equal(f.page._url, "/raw");
 });

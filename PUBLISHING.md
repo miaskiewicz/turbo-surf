@@ -52,6 +52,12 @@ Compiled core/MCP constants and NAPI/Python version functions use
 Check manifests and lockfile roots for the old version with `rg`; historical
 changelog entries and unrelated dependency versions must retain their own versions.
 
+## v0.8.7 candidate status
+
+The 0.8.7 candidate resolves all four Turbo-DOM crates from crates.io. Run the
+release guard and actual package-consumer checks on the registry graph in the
+release PR before tagging.
+
 ## Cut a release
 
 1. Bump all the version strings above to `X.Y.Z` (keep them identical).
@@ -360,7 +366,7 @@ their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
 dated provenance, not current dependency metadata. Since the turbo-dom
 consolidation, layout comes from `turbo-dom-layout` and the screenshot tier
-from `turbo-dom-raster`; the current manifests require 0.8.4. The release guard
+from `turbo-dom-raster`. The release guard
 requires the published registry graph described above. turbo-surf no longer
 depends on turbo-html2pdf.
 

@@ -243,19 +243,19 @@ async fn initial_continuation_reports_a_genuine_hard_interruption() {
 async fn plain_native_fetch_fixture_finishes_without_busy_work() {
     let document="<!doctype html><script type=module>globalThis.turn={entered:0,exited:0,active:false};await fetch('/gate').then(r=>r.text());turn.entered=1;turn.exited=1;</script>";
     let fixture = Fixture::with_html(document.into()).await;
-    let mut page = open(document, false, &fixture.origin).await;
+    let mut page = open_custom(document, false, &fixture.origin, 1_000, None).await;
     assert!(!page.hydration_diagnostics().budget_exceeded);
     assert_eq!(state(&mut page, None)["entered"], 1);
     page.close();
 }
 async fn caller_deadline(continuation: bool) {
     use std::time::{Duration, Instant};
-    let fixture = Fixture::start(false).await;
+    let fixture = Fixture::start(true).await;
     let started = Instant::now();
     let deadline = started + Duration::from_secs(2);
-    *fixture.release_at.lock().unwrap() = Some(deadline - Duration::from_millis(50));
+    *fixture.release_at.lock().unwrap() = Some(deadline - Duration::from_millis(750));
     let mut page = open_custom(
-        &html(false, continuation),
+        &html(true, continuation),
         continuation,
         &fixture.origin,
         5000,
@@ -273,13 +273,15 @@ async fn caller_deadline(continuation: bool) {
         assert!(page.hydration_diagnostics().budget_exceeded);
         Err(page.hydration_diagnostics().open_error.clone().unwrap())
     };
-    assert!(result
-        .unwrap_err()
-        .starts_with("Execution interrupted by the session execution budget"));
+    let error = result.unwrap_err();
+    assert!(
+        error.starts_with("Execution interrupted by the session execution budget"),
+        "{error}"
+    );
     let value = state(&mut page, None);
     assert_eq!(
         value["entered"], 1,
-        "actual finite callback must enter before caller deadline"
+        "actual callback must enter before caller deadline"
     );
     assert_eq!(
         value["exited"], 0,

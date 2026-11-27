@@ -188,11 +188,10 @@ check or source audit does not establish cross-platform execution.
 ## Dependency identity and verification
 
 The v0.8.7 candidate pins `turbo-dom`, `turbo-dom-browser-env`,
-`turbo-dom-layout` and `turbo-dom-raster` to one producer revision in
-[rust/Cargo.toml](../rust/Cargo.toml). [Cargo.lock](../rust/Cargo.lock) resolves those
-crates at 0.8.7 and uses registry `turbo-dom-v8` 150.4.2 and
-`turbo-surf-deno-core` 0.412.5. Published Surf releases require the registry
-versions of the DOM crates.
+`turbo-dom-layout` and `turbo-dom-raster` to their published versions.
+[Cargo.lock](../rust/Cargo.lock) records checksums for all four crates at 0.8.7
+and uses registry `turbo-dom-v8` 150.4.2 and
+`turbo-surf-deno-core` 0.412.5.
 
 The manifest and lockfile of the artifact being tested are authoritative after
 any repin. Record their hashes and resolved sources with the receipt; a package

@@ -8,9 +8,9 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
 pins `turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster` and
-`turbo-dom-browser-env` 0.8.7 to one development revision until the registry
-archives are available. See [Cargo.lock](Cargo.lock) for resolved sources and
-[the publication procedure](../PUBLISHING.md) for the registry cutover. The single
+`turbo-dom-browser-env` to the published 0.8.7 crates. See
+[Cargo.lock](Cargo.lock) for registry checksums and [PUBLISHING.md](../PUBLISHING.md)
+for release verification. The single
 V8 binding is the registry `turbo-dom-v8` 150.4.2. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in

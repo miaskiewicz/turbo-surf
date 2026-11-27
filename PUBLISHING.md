@@ -54,11 +54,9 @@ changelog entries and unrelated dependency versions must retain their own versio
 
 ## v0.8.7 candidate status
 
-The four Turbo-DOM 0.8.7 crates must be available on crates.io before removing
-the development Git pin. Resolve those published versions with targeted Cargo
-updates, verify their archive checksums, and run the release guard and actual
-package-consumer checks on the resulting registry graph. Use the draft release
-PR to review the Git-pinned candidate while publication is pending.
+The 0.8.7 candidate resolves all four Turbo-DOM crates from crates.io. Run the
+release guard and actual package-consumer checks on the registry graph in the
+release PR before tagging.
 
 ## Cut a release
 

@@ -7,7 +7,7 @@
 - Preserve the active document when a self-targeted link changes only its fragment.
 - Reuse prepared stylesheet selectors while the connected document and style inputs remain equivalent.
 - Skip native storage rewrites when sparse storage is current and collection would reclaim nothing, while still reconciling document ownership and cleaning up weak handles.
-- Pin all four Turbo-DOM crates to the same verified 0.8.7 revision, `dd2771f6`.
+- Use the published Turbo-DOM 0.8.7 crates and verify all four registry checksums.
 - All 46 payroll auth cases passed on a freshly built optimized addon pinned to Turbo-DOM `3c538a6e`, with animations disabled and the fixture unchanged. The wider payroll suite remains open.
 
 - Publish aborted intercepted fetch/XHR requests through the native event hub, with one request failure and no response or request-finished event.

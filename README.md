@@ -63,9 +63,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 
 Since 0.6.0 turbo-surf keeps no copies of shared engine code: it links the
 [turbo-dom](https://github.com/miaskiewicz/turbo-dom) crates that turbo-test and
-turbo-html2pdf use too. The 0.8.7 candidate pins the four DOM crates to one
-Turbo-DOM release commit. Publishing requires the matching crates.io archives
-and their lockfile checksums. The shared engine consists of:
+turbo-html2pdf use too. The 0.8.7 candidate uses the four published
+Turbo-DOM 0.8.7 crates and records their registry checksums in Cargo.lock. The shared engine consists of:
 
 - **`turbo-dom`** — HTML parser, copy-on-write DOM, CSSOM and the one selector engine;
 - **`turbo-dom-layout`** — style cascade and layout behind live geometry
@@ -85,8 +84,7 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 ## Status
 
 Status: **v0.8.7 release candidate**.
-The 0.8.7 candidate uses the Turbo-DOM 0.8.7 development pin while the registry
-crates await publication. See
+See
 [CHANGELOG.md](./CHANGELOG.md) for release changes and
 [PUBLISHING.md](./PUBLISHING.md) for release validation and artifact verification.
 The engine includes hardened

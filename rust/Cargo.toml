@@ -24,11 +24,3 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
-
-# Temporary immutable development pin to the turbo-dom release/0.8.7 branch.
-# Replace with registry 0.8.7 after publication, before tagging Surf.
-[patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "dd2771f66da8670e22d6136c0ec13027e6c1a0e3" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "dd2771f66da8670e22d6136c0ec13027e6c1a0e3" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "dd2771f66da8670e22d6136c0ec13027e6c1a0e3" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom.git", rev = "dd2771f66da8670e22d6136c0ec13027e6c1a0e3" }
